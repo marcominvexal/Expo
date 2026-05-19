@@ -5,23 +5,62 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>ExponentiaBot</title>
   <style>
-    body { font-family: system-ui, sans-serif; max-width: 42rem; margin: 4rem auto; padding: 0 1.5rem; line-height: 1.6; color: #0f172a; }
-    h1 { font-size: 1.75rem; }
-    code { background: #f1f5f9; padding: 0.15rem 0.4rem; border-radius: 4px; }
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 40rem;
+      margin: 4rem auto;
+      padding: 0 1.5rem;
+      line-height: 1.6;
+      color: #0f172a;
+      background: #f8fafc;
+    }
+    h1 { font-size: 1.75rem; margin-bottom: 0.25rem; }
+    .card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 1.25rem 1.5rem;
+      margin: 1.25rem 0;
+    }
+    .btn {
+      display: inline-block;
+      margin-top: 0.75rem;
+      padding: 0.65rem 1.25rem;
+      background: #ff4b4b;
+      color: #fff !important;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: 600;
+    }
+    .btn:hover { background: #e04343; }
+    code { background: #f1f5f9; padding: 0.15rem 0.4rem; border-radius: 4px; font-size: 0.9em; }
     a { color: #0369a1; }
+    .muted { color: #64748b; font-size: 0.95rem; }
   </style>
 </head>
 <body>
   <h1>ExponentiaBot</h1>
-  <p>
-    This repository is a <strong>Streamlit</strong> app. Vercel does not run Streamlit
-    dashboards as serverless functions.
-  </p>
-  <p>
-    Host the live app on <a href="https://share.streamlit.io/">Streamlit Community Cloud</a>
-    (recommended) or Render/Railway with:
-  </p>
-  <p><code>streamlit run streamlit_app.py --server.port=$PORT --server.address=0.0.0.0</code></p>
-  <p>See <code>README.md</code> in the repo for secrets and setup.</p>
+  <p class="muted">Vercel hosts this page only. The sales bot UI runs on Streamlit Cloud.</p>
+
+  <div class="card">
+    <strong>Run the live app</strong>
+    <p>Deploy from GitHub in one click (main file: <code>streamlit_app.py</code>):</p>
+    <a
+      class="btn"
+      href="https://share.streamlit.io/deploy?repository=marcominvexal/ExponentiaBot&branch=main&mainModule=streamlit_app.py"
+    >Deploy on Streamlit Cloud</a>
+    <p class="muted" style="margin-top:1rem;margin-bottom:0;">
+      After deploy, add secrets (Gemini, Gmail, Google service account). See
+      <a href="https://github.com/marcominvexal/ExponentiaBot#deploy">README</a>.
+    </p>
+  </div>
+
+  <div class="card">
+    <strong>Why not Vercel?</strong>
+    <p style="margin-bottom:0;">
+      Streamlit needs a long-running Python server. Vercel only runs short serverless functions,
+      so the dashboard cannot run here.
+    </p>
+  </div>
 </body>
 </html>

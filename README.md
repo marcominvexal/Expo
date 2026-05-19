@@ -46,15 +46,9 @@ After pushing, Vercel should build without the Python entrypoint error.
 1. Push this repo to GitHub.
 2. Open [share.streamlit.io](https://share.streamlit.io) → **New app** → select the repo.
 3. Set **Main file path** to `streamlit_app.py`.
-4. Under **Secrets**, add (TOML format):
+4. Under **Secrets**, paste TOML like `.streamlit/secrets.toml.example` (Gemini + Gmail + `[gcp_service_account]` from your JSON file). Share the Google Sheet with the service account `client_email`.
 
-   ```toml
-   GEMINI_API_KEY = "your_key"
-   EMAIL_USER = "your@gmail.com"
-   EMAIL_PASS = "your_gmail_app_password"
-   ```
-
-5. Upload `service_account.json` content via secrets as a file, or paste JSON into a secret and load it in code (share the sheet with the service account email).
+5. Open your app URL (e.g. `https://exponentiabot-xxxxx.streamlit.app`).
 
 ### Render (alternative)
 

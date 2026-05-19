@@ -11,23 +11,62 @@ from dotenv import load_dotenv
 from google import genai
 from google.oauth2.service_account import Credentials
 
-# Force reload environment variables from secrets.env and .env
+# Local secrets (Streamlit Cloud uses st.secrets instead)
 load_dotenv("secrets.env", override=True)
 load_dotenv(override=True)
 
-GEMINI_KEY = os.getenv("GEMINI_API_KEY")
-EMAIL_USER = os.getenv("EMAIL_USER")
-EMAIL_PASS = (os.getenv("EMAIL_PASS") or "").replace(" ", "")
-
-client = genai.Client(api_key=GEMINI_KEY)
-
-# Google Sheets Configuration
 SCOPE = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-CREDS = Credentials.from_service_account_file("service_account.json", scopes=SCOPE)
-G_CLIENT = gspread.authorize(CREDS)
 SPREADSHEET_ID = "1jgbUhsKhD2fPH4l4q2kvWCQAfhXYka21KgBnOiTLfkc"
 WORKSHEET_GID = 541908909
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit#gid={WORKSHEET_GID}"
+
+
+def env_or_secret(key, default=None):
+    """Read from environment (local) or Streamlit Cloud secrets."""
+    value = os.getenv(key)
+    if value:
+        return value
+    try:
+        return st.secrets[key]
+    except Exception:
+        return default
+
+
+def load_google_credentials():
+    """Local file, JSON env var, or [gcp_service_account] in Streamlit secrets."""
+    try:
+        if "gcp_service_account" in st.secrets:
+            return Credentials.from_service_account_info(
+                dict(st.secrets["gcp_service_account"]), scopes=SCOPE
+            )
+    except Exception:
+        pass
+
+    raw = env_or_secret("GOOGLE_SERVICE_ACCOUNT_JSON")
+    if raw:
+        data = json.loads(raw) if isinstance(raw, str) else dict(raw)
+        return Credentials.from_service_account_info(data, scopes=SCOPE)
+
+    if os.path.isfile("service_account.json"):
+        return Credentials.from_service_account_file("service_account.json", scopes=SCOPE)
+
+    raise FileNotFoundError(
+        "Google credentials missing. Add service_account.json locally or "
+        "gcp_service_account in Streamlit Cloud secrets (see README)."
+    )
+
+
+@st.cache_resource
+def get_gspread_client():
+    return gspread.authorize(load_google_credentials())
+
+
+@st.cache_resource
+def get_genai_client():
+    key = env_or_secret("GEMINI_API_KEY")
+    if not key:
+        raise ValueError("Set GEMINI_API_KEY in secrets.env or Streamlit secrets.")
+    return genai.Client(api_key=key)
 
 
 def extract_thread_dates(body, email_user):
@@ -148,7 +187,7 @@ def format_sheet_date(value):
 
 
 def get_funnel_worksheet():
-    spreadsheet = G_CLIENT.open_by_key(SPREADSHEET_ID)
+    spreadsheet = get_gspread_client().open_by_key(SPREADSHEET_ID)
     return spreadsheet.get_worksheet_by_id(WORKSHEET_GID)
 
 
@@ -402,7 +441,7 @@ def get_ai_extraction(email_body):
     {email_body}
     """
 
-    response = client.models.generate_content(
+    response = get_genai_client().models.generate_content(
         model="gemini-2.5-flash",
         contents=prompt,
         config={
@@ -451,11 +490,13 @@ def run_bot():
         existing_data = sheet.get_all_records()
         last_s_no = len(existing_data) + 1
 
-        if not EMAIL_USER or not EMAIL_PASS:
-            return "Set EMAIL_USER and EMAIL_PASS in .env or secrets.env (use a Gmail App Password)."
+        email_user = env_or_secret("EMAIL_USER")
+        email_pass = (env_or_secret("EMAIL_PASS") or "").replace(" ", "")
+        if not email_user or not email_pass:
+            return "Set EMAIL_USER and EMAIL_PASS in secrets.env or Streamlit Cloud secrets."
 
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
-        mail.login(EMAIL_USER, EMAIL_PASS)
+        mail.login(email_user, email_pass)
         mail.select("inbox")
         _, messages = mail.search(None, 'UNSEEN')
 
@@ -478,7 +519,7 @@ def run_bot():
             else:
                 body = msg.get_payload(decode=True).decode(errors='ignore')
 
-            opp_date, prop_date = extract_thread_dates(body, EMAIL_USER)
+            opp_date, prop_date = extract_thread_dates(body, email_user)
 
             days_between = (prop_date - opp_date).days
             tat = days_between - 1
