@@ -69,36 +69,145 @@ def get_genai_client():
     return genai.Client(api_key=key)
 
 
-def extract_thread_dates(body, email_user):
-    date_patterns = re.findall(r'Sent: .*?, (.*?) [0-9]', body)
-    dates = []
+_COMMERCIAL_HINTS = (
+    "nrc", "mrc", "commercial", "quote id", "circuit", "mbps", "gbps",
+    "monthly", "one-time", "one time", "otc", "pricing", "proposal",
+    "contract term", "usd", "$", "rate",
+)
 
-    for d_str in date_patterns:
+_DATE_PARSE_FORMATS = (
+    "%B %d, %Y",
+    "%b %d, %Y",
+    "%d %B %Y",
+    "%d %b %Y",
+    "%a, %b %d, %Y",
+    "%A, %B %d, %Y",
+)
+
+
+def parse_email_date(date_str):
+    if not date_str:
+        return None
+    clean = re.sub(r"\s+", " ", date_str.split(" at ")[0].strip())
+    clean = re.sub(r"^\w+day,?\s+", "", clean, flags=re.IGNORECASE)
+    for fmt in _DATE_PARSE_FORMATS:
         try:
-            clean_date = d_str.split(' at ')[0].strip()
-            dates.append(datetime.strptime(clean_date, "%B %d, %Y"))
-        except Exception:
+            return datetime.strptime(clean, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def is_team_sender(from_line, email_user):
+    """Exponentia mailbox or domain — commercials sent from team."""
+    if not from_line:
+        return False
+    _, addr = parseaddr(from_line)
+    addr = (addr or "").lower().strip()
+    user = (email_user or "").lower().strip()
+    if user and (addr == user or user in from_line.lower()):
+        return True
+    return is_exponentia_email(addr) or is_exponentia_name(from_line)
+
+
+def looks_like_commercials(text):
+    """Heuristic: team reply that likely contains pricing / quote table."""
+    if not text:
+        return False
+    lowered = text.lower()
+    return sum(1 for hint in _COMMERCIAL_HINTS if hint in lowered) >= 2
+
+
+def extract_thread_messages(body):
+    """Parse forwarded thread into dated messages with sender role."""
+    messages = []
+    for chunk in re.split(r"(?i)(?=From:\s*)", body):
+        chunk = chunk.strip()
+        if not chunk:
             continue
 
-    if not dates:
-        return datetime.now(), datetime.now()
+        from_line = ""
+        body_text = chunk
+        if re.match(r"(?i)From:\s*", chunk):
+            header_end = chunk.find("\n")
+            if header_end == -1:
+                from_line = re.sub(r"(?i)^From:\s*", "", chunk).strip()
+                body_text = ""
+            else:
+                from_line = re.sub(r"(?i)^From:\s*", "", chunk[:header_end]).strip()
+                body_text = chunk[header_end + 1 :]
 
-    opportunity_date = min(dates)
-    proposal_date = max(dates)
+        sent_match = re.search(
+            r"Sent:\s*(?:\w+day,?\s+)?(.*?)(?:\s+\d{1,2}:\d{2}(?:\s*[AP]M)?|\s+\d{4})",
+            body_text,
+            re.IGNORECASE,
+        )
+        if not sent_match:
+            sent_match = re.search(r"Sent: .*?, (.*?) \d", body_text)
 
-    chunks = re.split(r'From:', body)
-    for chunk in chunks:
-        if email_user in chunk:
-            team_date_match = re.search(r'Sent: .*?, (.*?) [0-9]', chunk)
-            if team_date_match:
-                try:
-                    clean_team_date = team_date_match.group(1).split(' at ')[0].strip()
-                    proposal_date = datetime.strptime(clean_team_date, "%B %d, %Y")
-                    break
-                except Exception:
-                    continue
+        if not sent_match:
+            continue
+
+        sent_at = parse_email_date(sent_match.group(1))
+        if not sent_at:
+            continue
+
+        messages.append(
+            {
+                "date": sent_at,
+                "from": from_line,
+                "body": body_text,
+            }
+        )
+
+    return messages
+
+
+def extract_thread_dates(body, email_user):
+    """
+    Opportunity date: first partner email for this RFQ (RFQ received).
+    Proposal date: when Exponentia sends commercials / pricing to the customer.
+    """
+    messages = extract_thread_messages(body)
+    for msg in messages:
+        msg["is_team"] = is_team_sender(msg["from"], email_user)
+        msg["is_partner"] = bool(msg["from"]) and not msg["is_team"]
+
+    if not messages:
+        now = datetime.now()
+        return now, now
+
+    messages.sort(key=lambda m: m["date"])
+
+    partner_messages = [m for m in messages if m["is_partner"]]
+    if partner_messages:
+        opportunity_date = partner_messages[0]["date"]
+    else:
+        opportunity_date = messages[0]["date"]
+
+    team_after_opp = [
+        m for m in messages
+        if m["is_team"] and m["date"].date() >= opportunity_date.date()
+    ]
+    commercial_replies = [m for m in team_after_opp if looks_like_commercials(m["body"])]
+
+    if commercial_replies:
+        proposal_date = commercial_replies[0]["date"]
+    elif team_after_opp:
+        proposal_date = team_after_opp[0]["date"]
+    else:
+        proposal_date = opportunity_date
+
+    if proposal_date.date() < opportunity_date.date():
+        proposal_date = opportunity_date
 
     return opportunity_date, proposal_date
+
+
+def calculate_tat(opportunity_date, proposal_date):
+    """Days from RFQ receipt to commercials sent, excluding the receipt day."""
+    delta_days = (proposal_date.date() - opportunity_date.date()).days
+    return max(0, delta_days - 1)
 
 
 def parse_currency_number(value):
@@ -520,11 +629,7 @@ def run_bot():
                 body = msg.get_payload(decode=True).decode(errors='ignore')
 
             opp_date, prop_date = extract_thread_dates(body, email_user)
-
-            days_between = (prop_date - opp_date).days
-            tat = days_between - 1
-            if tat < 0:
-                tat = 0
+            tat = calculate_tat(opp_date, prop_date)
 
             circuits = expand_circuits_by_contract_terms(get_ai_extraction(body))
 
