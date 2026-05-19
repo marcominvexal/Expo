@@ -1,0 +1,8 @@
+streamlit_app.py
+mian.py
+secrets.env
+.env
+service_account.json
+__pycache__
+.venv
+venv

@@ -27,11 +27,38 @@ Sales funnel automation for **Exponentia Global**: sync unread Gmail quote email
 
 3. Place `service_account.json` in the project root and share your Google Sheet with the service account email.
 
-4. Run the app:
+4. Run the app locally:
 
    ```bash
-   streamlit run main.py
+   streamlit run streamlit_app.py
    ```
+
+## Deploy
+
+### Vercel (this repo)
+
+Vercel only hosts the static info page in `public/`. The Streamlit app **cannot** run on Vercel serverless (no `main.py` entrypoint).
+
+After pushing, Vercel should build without the Python entrypoint error.
+
+### Streamlit Community Cloud (recommended for the live app)
+
+1. Push this repo to GitHub.
+2. Open [share.streamlit.io](https://share.streamlit.io) → **New app** → select the repo.
+3. Set **Main file path** to `streamlit_app.py`.
+4. Under **Secrets**, add (TOML format):
+
+   ```toml
+   GEMINI_API_KEY = "your_key"
+   EMAIL_USER = "your@gmail.com"
+   EMAIL_PASS = "your_gmail_app_password"
+   ```
+
+5. Upload `service_account.json` content via secrets as a file, or paste JSON into a secret and load it in code (share the sheet with the service account email).
+
+### Render (alternative)
+
+Use the included `render.yaml`, set env vars in the dashboard, and add `service_account.json` via a secret file mount or env.
 
 ## Security
 

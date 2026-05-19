@@ -6,7 +6,7 @@ import json
 import re
 import gspread
 import streamlit as st
-from datetime import datetime
+from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from google import genai
 from google.oauth2.service_account import Credentials
@@ -75,6 +75,124 @@ def parse_currency_number(value):
         return float(cleaned)
     except ValueError:
         return None
+
+
+SHEET_DATE_FORMAT = "%d-%B-%Y"  # e.g. 19-May-2026
+# Column indices (0-based) for Opportunity Date (C) and Proposal Date (P)
+SHEET_DATE_COLUMN_INDICES = (2, 15)
+
+_DATE_PARSE_FORMATS = (
+    SHEET_DATE_FORMAT,
+    "%B, %d' %y",
+    "%B %d, %Y",
+    "%Y-%m-%d",
+    "%B-%d-%Y",
+    "%B-%d-%y",
+    "%b-%d-%y",
+    "%m/%d/%Y",
+    "%d/%m/%Y",
+    "%d-%b-%Y",
+    "%d %B %Y",
+)
+
+
+def col_index_to_letter(index):
+    """Convert 0-based column index to sheet letter (0 -> A, 15 -> P)."""
+    n = index + 1
+    letters = ""
+    while n:
+        n, remainder = divmod(n - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
+
+
+def parse_sheet_date_value(value):
+    """Parse a sheet cell into datetime, or None if not a date."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, (int, float)):
+        try:
+            return datetime(1899, 12, 30) + timedelta(days=float(value))
+        except (ValueError, OverflowError):
+            return None
+
+    text = str(value).strip()
+    if not text or text == "-":
+        return None
+
+    if re.fullmatch(r"\d+(\.\d+)?", text):
+        try:
+            return datetime(1899, 12, 30) + timedelta(days=float(text))
+        except (ValueError, OverflowError):
+            pass
+
+    for fmt in _DATE_PARSE_FORMATS:
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def format_sheet_date(value):
+    """Format dates for the sheet as dd-Month-yyyy (e.g. 19-May-2026)."""
+    if value is None:
+        return "-"
+    parsed = value if isinstance(value, datetime) else parse_sheet_date_value(value)
+    if parsed is not None:
+        return parsed.strftime(SHEET_DATE_FORMAT)
+    text = str(value).strip()
+    return text if text else "-"
+
+
+def get_funnel_worksheet():
+    spreadsheet = G_CLIENT.open_by_key(SPREADSHEET_ID)
+    return spreadsheet.get_worksheet_by_id(WORKSHEET_GID)
+
+
+def reformat_existing_sheet_dates():
+    """Rewrite Opportunity and Proposal date columns to dd-Month-yyyy for all rows."""
+    sheet = get_funnel_worksheet()
+    all_values = sheet.get_all_values()
+    if not all_values:
+        return "Sheet is empty — nothing to update."
+
+    batch = []
+    updated_cells = 0
+
+    for row_idx, row in enumerate(all_values):
+        if row_idx == 0:
+            continue
+        row_num = row_idx + 1
+        for col_idx in SHEET_DATE_COLUMN_INDICES:
+            if col_idx >= len(row):
+                continue
+            raw = row[col_idx]
+            parsed = parse_sheet_date_value(raw)
+            if parsed is None:
+                continue
+            formatted = format_sheet_date(parsed)
+            if str(raw).strip() == formatted:
+                continue
+            col_letter = col_index_to_letter(col_idx)
+            batch.append({"range": f"{col_letter}{row_num}", "values": [[formatted]]})
+            updated_cells += 1
+
+    if not batch:
+        return "All dates already use dd-Month-yyyy (e.g. 19-May-2026)."
+
+    sheet.batch_update(batch, value_input_option="USER_ENTERED")
+    row_nums = set()
+    for item in batch:
+        digits = "".join(ch for ch in item["range"] if ch.isdigit())
+        if digits:
+            row_nums.add(int(digits))
+    return (
+        f"Updated {updated_cells} date cell(s) across {len(row_nums)} row(s) "
+        "to dd-Month-yyyy (e.g. 19-May-2026)."
+    )
 
 
 def format_currency(value):
@@ -191,6 +309,65 @@ def normalize_partner_name(partner, email_from=None):
     return "-"
 
 
+def extract_contract_term_labels(text):
+    """Find distinct contract terms like 12/24/36 months in a single string."""
+    if not text:
+        return []
+    labels = []
+    seen = set()
+    for match in re.finditer(
+        r"\b(12|24|36|48|60)\s*(?:month|months|mo\.?|mths?)\b",
+        str(text),
+        re.IGNORECASE,
+    ):
+        label = f"{match.group(1)} Months"
+        key = match.group(1)
+        if key not in seen:
+            seen.add(key)
+            labels.append(label)
+    return labels
+
+
+def split_currency_values(value):
+    """Pull multiple $ amounts from one cell (e.g. multi-term pricing columns)."""
+    if value is None:
+        return []
+    text = str(value).strip()
+    if not text or text == "-":
+        return []
+    amounts = re.findall(r"\$[\d,]+(?:\.\d{2})?", text)
+    if not amounts:
+        amounts = re.findall(r"(?<!\d)(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})(?!\d)", text)
+    return amounts
+
+
+def expand_circuits_by_contract_terms(circuits):
+    """
+    One sheet row per contract term. When a table row lists 12/24/36 month
+    pricing together, split into separate entries with matching NRC/MRC when possible.
+    """
+    expanded = []
+    for circuit in circuits:
+        terms = extract_contract_term_labels(circuit.get("Contract Terms", ""))
+        if len(terms) <= 1:
+            expanded.append(circuit)
+            continue
+
+        mrc_values = split_currency_values(circuit.get("MRC"))
+        nrc_values = split_currency_values(circuit.get("NRC"))
+
+        for index, term in enumerate(terms):
+            row = dict(circuit)
+            row["Contract Terms"] = term
+            if index < len(mrc_values):
+                row["MRC"] = mrc_values[index]
+            if index < len(nrc_values):
+                row["NRC"] = nrc_values[index]
+            expanded.append(row)
+
+    return expanded
+
+
 def get_ai_extraction(email_body):
     prompt = f"""
     You are an expert telecom data verification entity. Extract quoting matrix rows into clean structured objects.
@@ -211,6 +388,15 @@ def get_ai_extraction(email_body):
        - End Customer: The final client organization the partner is quoting for (brought by the partner to Exponentia).
          Example: 'Baker Hughes'. A partner can bring many different end customers.
        - Do NOT put End Customer into Partner Name. Do NOT put Exponentia Global into Partner Name.
+    6. Contract Terms — one row per term (CRITICAL for pricing tables):
+       - If a single table row shows multiple contract terms (e.g. columns or cells for
+         12 month, 24 month, 36 month), you MUST output a SEPARATE object for EACH term.
+       - Do NOT combine 12/24/36 into one object or one Contract Terms field.
+       - Each object keeps the same circuit details (Quote ID, sites, technology, service,
+         capacity, partner, end customer, etc.) but exactly ONE Contract Terms value
+         (e.g. '12 Months', '24 Months', '36 Months').
+       - NRC and MRC must be the values for THAT term only (from that column/cell), not
+         a combined list of all terms.
 
     EMAIL THREAD FOR PROCESSING:
     {email_body}
@@ -261,8 +447,7 @@ def get_ai_extraction(email_body):
 def run_bot():
     mail = None
     try:
-        spreadsheet = G_CLIENT.open_by_key(SPREADSHEET_ID)
-        sheet = spreadsheet.get_worksheet_by_id(WORKSHEET_GID)
+        sheet = get_funnel_worksheet()
         existing_data = sheet.get_all_records()
         last_s_no = len(existing_data) + 1
 
@@ -300,7 +485,7 @@ def run_bot():
             if tat < 0:
                 tat = 0
 
-            circuits = get_ai_extraction(body)
+            circuits = expand_circuits_by_contract_terms(get_ai_extraction(body))
 
             for c in circuits:
                 lm_infra = c.get('LM Infra Details', '-')
@@ -308,11 +493,11 @@ def run_bot():
                 end_customer = c.get('End Customer', '-')
                 partner_name = normalize_partner_name(c.get('Partner Name'), email_from)
                 new_rows.append([
-                    last_s_no, c.get('Quote ID', '-'), opp_date.strftime('%Y-%m-%d'),
+                    last_s_no, c.get('Quote ID', '-'), format_sheet_date(opp_date),
                     partner_name, end_customer, c.get('Site A', '-'),
                     c.get('Site A City', '-'), c.get('Site B', '-'), c.get('Site B City', '-'),
                     c.get('Technology', '-'), c.get('Service/Product', '-'), c.get('Capacity / Quantity', '-'),
-                    format_currency(c.get('NRC')), format_currency(c.get('MRC')), 'Email', prop_date.strftime('%Y-%m-%d'),
+                    format_currency(c.get('NRC')), format_currency(c.get('MRC')), 'Email', format_sheet_date(prop_date),
                     c.get('Contract Terms', '-'), c.get('Sales Effort By', '-'), c.get('Comments', '-'),
                     'OPEN', 'MEDIUM', c.get('POC', '-'), c.get('Contact Email Address', '-'),
                     tat, c.get('On-Net/Off-Net', '-'), lm_infra,
@@ -473,7 +658,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-sync_col, info_col = st.columns([1.2, 1])
+sync_col, format_col, info_col = st.columns([1.2, 1, 1])
 with sync_col:
     if st.button("Sync Gmail to Google Sheets"):
         with st.spinner("Analyzing emails with Gemini…"):
@@ -482,6 +667,16 @@ with sync_col:
                 st.success(result)
             else:
                 st.error(result or "Unknown error.")
+with format_col:
+    if st.button("Reformat sheet dates"):
+        with st.spinner("Updating existing date cells…"):
+            result = reformat_existing_sheet_dates()
+            if result and "Updated" in result:
+                st.success(result)
+            elif result and "already" in result:
+                st.info(result)
+            else:
+                st.warning(result or "No dates updated.")
 with info_col:
     st.markdown(
         """
