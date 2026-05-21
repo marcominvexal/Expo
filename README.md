@@ -57,3 +57,5 @@ Use the included `render.yaml`, set env vars in the dashboard, and add `service_
 ## Security
 
 Do not commit `secrets.env`, `.env`, or `service_account.json`. They are listed in `.gitignore`.
+
+# expo
