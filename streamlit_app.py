@@ -32,28 +32,101 @@ def env_or_secret(key, default=None):
         return default
 
 
-def load_google_credentials():
-    """Local file, JSON env var, or [gcp_service_account] in Streamlit secrets."""
+def _coerce_mapping(raw):
+    """Convert Streamlit SecretDict / dict / JSON string to a plain dict."""
+    if raw is None:
+        return None
+    if isinstance(raw, str):
+        return json.loads(raw.strip())
+    if hasattr(raw, "to_dict"):
+        return raw.to_dict()
     try:
-        if "gcp_service_account" in st.secrets:
-            return Credentials.from_service_account_info(
-                dict(st.secrets["gcp_service_account"]), scopes=SCOPE
-            )
-    except Exception:
-        pass
+        return dict(raw)
+    except (TypeError, ValueError):
+        return {k: raw[k] for k in raw}
 
-    raw = env_or_secret("GOOGLE_SERVICE_ACCOUNT_JSON")
-    if raw:
-        data = json.loads(raw) if isinstance(raw, str) else dict(raw)
-        return Credentials.from_service_account_info(data, scopes=SCOPE)
+
+def _normalize_service_account_info(info):
+    """Fix private_key newlines for Streamlit Cloud TOML secrets."""
+    data = _coerce_mapping(info)
+    if not data:
+        return None
+    pk = data.get("private_key")
+    if isinstance(pk, str) and "\\n" in pk:
+        data["private_key"] = pk.replace("\\n", "\n")
+    return data
+
+
+def _credentials_from_service_account_info(info):
+    data = _normalize_service_account_info(info)
+    if not data:
+        return None
+    if not data.get("client_email") or not data.get("private_key"):
+        return None
+    return Credentials.from_service_account_info(data, scopes=SCOPE)
+
+
+def load_google_credentials():
+    """
+    Load Google Sheets credentials (local file or Streamlit Cloud secrets).
+    Streamlit Cloud: paste TOML with [gcp_service_account] in App settings → Secrets.
+    """
+    load_errors = []
+
+    for section in (
+        "gcp_service_account",
+        "google_service_account",
+        "service_account",
+        "gcp",
+    ):
+        try:
+            if section not in st.secrets:
+                continue
+            creds = _credentials_from_service_account_info(st.secrets[section])
+            if creds:
+                return creds
+            load_errors.append(f"[{section}] missing client_email or private_key")
+        except Exception as exc:
+            load_errors.append(f"[{section}] {exc}")
+
+    for key in (
+        "GOOGLE_SERVICE_ACCOUNT_JSON",
+        "GCP_SERVICE_ACCOUNT_JSON",
+        "SERVICE_ACCOUNT_JSON",
+    ):
+        try:
+            raw = env_or_secret(key)
+            if not raw:
+                continue
+            creds = _credentials_from_service_account_info(raw)
+            if creds:
+                return creds
+        except Exception as exc:
+            load_errors.append(f"{key}: {exc}")
 
     if os.path.isfile("service_account.json"):
-        return Credentials.from_service_account_file("service_account.json", scopes=SCOPE)
+        try:
+            return Credentials.from_service_account_file(
+                "service_account.json", scopes=SCOPE
+            )
+        except Exception as exc:
+            load_errors.append(f"service_account.json: {exc}")
 
-    raise FileNotFoundError(
-        "Google credentials missing. Add service_account.json locally or "
-        "gcp_service_account in Streamlit Cloud secrets (see README)."
+    hint = (
+        "On Streamlit Cloud: App settings → Secrets → paste the full TOML block "
+        "from `.streamlit/secrets.toml.example` (including [gcp_service_account]). "
+        "Then Reboot app. Share the sheet with the service account client_email."
     )
+    detail = "; ".join(load_errors) if load_errors else "no [gcp_service_account] in st.secrets"
+    raise FileNotFoundError(f"Google credentials missing. {hint} Details: {detail}")
+
+
+def google_credentials_configured():
+    try:
+        load_google_credentials()
+        return True, None
+    except Exception as exc:
+        return False, str(exc)
 
 
 @st.cache_resource
@@ -772,6 +845,25 @@ def inject_custom_css():
     st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
 
 inject_custom_css()
+
+creds_ok, creds_error = google_credentials_configured()
+if not creds_ok:
+    st.error(creds_error)
+    with st.expander("Fix Streamlit Cloud secrets (copy into App settings → Secrets)"):
+        example_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            ".streamlit",
+            "secrets.toml.example",
+        )
+        try:
+            with open(example_path, encoding="utf-8") as f:
+                st.code(f.read(), language="toml")
+        except OSError:
+            st.markdown(
+                "Add `[gcp_service_account]` with all fields from your "
+                "`service_account.json` plus `GEMINI_API_KEY`, `EMAIL_USER`, `EMAIL_PASS`."
+            )
+    st.stop()
 
 hero_left, hero_right = st.columns([1.1, 2.2], gap="large")
 with hero_left:
