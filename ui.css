@@ -337,6 +337,29 @@ footer {
   box-shadow: 0 8px 24px rgba(56, 189, 248, 0.3);
 }
 
+.deploy-card { margin-top: 1.25rem; }
+.deploy-steps {
+  color: #cbd5e1;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  margin: 0.5rem 0 1rem;
+  padding-left: 1.25rem;
+}
+.deploy-steps li { margin-bottom: 0.65rem; }
+.deploy-steps a { color: #7dd3fc !important; }
+.deploy-steps code {
+  background: rgba(15, 23, 42, 0.6);
+  padding: 0.1rem 0.35rem;
+  border-radius: 4px;
+  font-size: 0.85em;
+}
+.deploy-note { margin-top: 0.5rem; font-size: 0.85rem; opacity: 0.9; }
+
+div[data-testid="stLinkButton"] > a {
+  border-radius: 12px !important;
+  font-weight: 600 !important;
+}
+
 /* Streamlit widgets */
 div[data-testid="stButton"] > button {
   width: 100% !important;

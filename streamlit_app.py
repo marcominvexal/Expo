@@ -692,6 +692,11 @@ INVEXAL_LOGO = "https://invexal.com/wp-content/uploads/2023/07/Invexal-Logo-01-1
 GEMINI_LOGO = "https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg"
 GMAIL_LOGO = "https://www.gstatic.com/images/branding/product/2x/gmail_2020q4_48dp.png"
 SHEETS_LOGO = "https://www.gstatic.com/images/branding/product/2x/sheets_2020q4_48dp.png"
+GITHUB_REPO_URL = "https://github.com/marcominvexal/ExponentiaBot"
+STREAMLIT_DEPLOY_URL = (
+    "https://share.streamlit.io/deploy?repository=marcominvexal/ExponentiaBot"
+    "&branch=main&mainModule=streamlit_app.py"
+)
 
 st.set_page_config(
     page_title="Exponentia Sales Bot",
@@ -846,3 +851,31 @@ st.markdown(
     """,
     unsafe_allow_html=True,
 )
+
+st.markdown(
+    f"""
+    <div class="glass-card deploy-card">
+        <p class="card-label">Publish the app</p>
+        <p class="card-heading">Deploy in this order</p>
+        <ol class="deploy-steps">
+            <li><strong>Push to GitHub first</strong> — commit the full project (code only) to
+                <a href="{GITHUB_REPO_URL}" target="_blank">github.com/marcominvexal/ExponentiaBot</a>.
+                Never commit <code>secrets.env</code>, <code>.env</code>, or <code>service_account.json</code>.</li>
+            <li><strong>Deploy on Streamlit Cloud</strong> — connect the same repo, branch <code>main</code>,
+                main file <code>streamlit_app.py</code>.</li>
+            <li><strong>Add Streamlit Secrets</strong> — paste TOML from <code>.streamlit/secrets.toml.example</code>
+                (Gemini, Gmail, <code>[gcp_service_account]</code>). Share the Google Sheet with the service account email.</li>
+            <li><strong>Open your live URL</strong> — e.g. <code>https://exponentiabot-xxxxx.streamlit.app</code>
+                (Streamlit redeploys automatically on each GitHub push).</li>
+        </ol>
+        <p class="card-body deploy-note">Vercel only hosts a static info page — the dashboard runs on Streamlit Cloud or locally at <code>localhost:8501</code>.</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+deploy_col1, deploy_col2 = st.columns(2)
+with deploy_col1:
+    st.link_button("Open GitHub repo", GITHUB_REPO_URL, use_container_width=True)
+with deploy_col2:
+    st.link_button("Deploy on Streamlit Cloud", STREAMLIT_DEPLOY_URL, use_container_width=True)
