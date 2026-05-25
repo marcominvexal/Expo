@@ -594,9 +594,9 @@ INVEXAL_LOGO = "https://invexal.com/wp-content/uploads/2023/07/Invexal-Logo-01-1
 GEMINI_LOGO = "https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg"
 GMAIL_LOGO = "https://www.gstatic.com/images/branding/product/2x/gmail_2020q4_48dp.png"
 SHEETS_LOGO = "https://www.gstatic.com/images/branding/product/2x/sheets_2020q4_48dp.png"
-GITHUB_REPO_URL = "https://github.com/marcominvexal/expo"
+GITHUB_REPO_URL = "https://github.com/marcominvexal/Expo"
 STREAMLIT_DEPLOY_URL = (
-    "https://share.streamlit.io/deploy?repository=marcominvexal/expo"
+    "https://share.streamlit.io/deploy?repository=marcominvexal/Expo"
     "&branch=main&mainModule=streamlit_app.py"
 )
 
@@ -780,7 +780,7 @@ st.markdown(
         <p class="card-heading">Deploy in this order</p>
         <ol class="deploy-steps">
             <li><strong>Push to GitHub first</strong> — commit the full project (code only) to
-                <a href="{GITHUB_REPO_URL}" target="_blank">github.com/marcominvexal/ExponentiaBot</a>.
+                <a href="{GITHUB_REPO_URL}" target="_blank">github.com/marcominvexal/Expo</a>.
                 Never commit <code>secrets.env</code>, <code>.env</code>, or <code>service_account.json</code>.</li>
             <li><strong>Deploy on Streamlit Cloud</strong> — connect the same repo, branch <code>main</code>,
                 main file <code>streamlit_app.py</code>.</li>
