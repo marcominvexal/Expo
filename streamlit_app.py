@@ -66,10 +66,81 @@ def _credentials_from_service_account_info(info):
     return Credentials.from_service_account_info(data, scopes=SCOPE)
 
 
+def _streamlit_secret_top_level_keys():
+    try:
+        return list(st.secrets.keys())
+    except Exception:
+        return []
+
+
+def _get_streamlit_secret_section(section_name):
+    """Read a TOML section from st.secrets (Cloud UI or local secrets.toml)."""
+    try:
+        return st.secrets[section_name]
+    except Exception:
+        pass
+    try:
+        return getattr(st.secrets, section_name)
+    except Exception:
+        pass
+    return None
+
+
+def _service_account_from_streamlit_env(prefix="GCP_SERVICE_ACCOUNT"):
+    """
+    Streamlit Cloud also exposes nested secrets as env vars, e.g.
+    GCP_SERVICE_ACCOUNT_CLIENT_EMAIL, GCP_SERVICE_ACCOUNT_PRIVATE_KEY.
+    """
+    field_map = {
+        "TYPE": "type",
+        "PROJECT_ID": "project_id",
+        "PRIVATE_KEY_ID": "private_key_id",
+        "PRIVATE_KEY": "private_key",
+        "CLIENT_EMAIL": "client_email",
+        "CLIENT_ID": "client_id",
+        "AUTH_URI": "auth_uri",
+        "TOKEN_URI": "token_uri",
+        "AUTH_PROVIDER_X509_CERT_URL": "auth_provider_x509_cert_url",
+        "CLIENT_X509_CERT_URL": "client_x509_cert_url",
+        "UNIVERSE_DOMAIN": "universe_domain",
+    }
+    data = {}
+    head = f"{prefix}_"
+    for env_key, env_val in os.environ.items():
+        if not env_key.startswith(head):
+            continue
+        suffix = env_key[len(head) :]
+        field = field_map.get(suffix)
+        if field:
+            data[field] = env_val
+    if data.get("client_email") and data.get("private_key"):
+        return data
+    return None
+
+
+def _service_account_from_local_toml():
+    """Fallback: read .streamlit/secrets.toml when running locally."""
+    import tomllib
+
+    toml_path = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)),
+        ".streamlit",
+        "secrets.toml",
+    )
+    if not os.path.isfile(toml_path):
+        return None
+    with open(toml_path, "rb") as handle:
+        parsed = tomllib.load(handle)
+    for section in ("gcp_service_account", "google_service_account", "service_account"):
+        if section in parsed:
+            return parsed[section]
+    return None
+
+
 def load_google_credentials():
     """
     Load Google Sheets credentials (local file or Streamlit Cloud secrets).
-    Streamlit Cloud: paste TOML with [gcp_service_account] in App settings → Secrets.
+    Streamlit Cloud: paste full TOML in App settings → Secrets, then Reboot app.
     """
     load_errors = []
 
@@ -80,9 +151,10 @@ def load_google_credentials():
         "gcp",
     ):
         try:
-            if section not in st.secrets:
+            block = _get_streamlit_secret_section(section)
+            if block is None:
                 continue
-            creds = _credentials_from_service_account_info(st.secrets[section])
+            creds = _credentials_from_service_account_info(block)
             if creds:
                 return creds
             load_errors.append(f"[{section}] missing client_email or private_key")
@@ -104,6 +176,24 @@ def load_google_credentials():
         except Exception as exc:
             load_errors.append(f"{key}: {exc}")
 
+    try:
+        env_block = _service_account_from_streamlit_env()
+        if env_block:
+            creds = _credentials_from_service_account_info(env_block)
+            if creds:
+                return creds
+    except Exception as exc:
+        load_errors.append(f"GCP_SERVICE_ACCOUNT_* env: {exc}")
+
+    try:
+        local_block = _service_account_from_local_toml()
+        if local_block:
+            creds = _credentials_from_service_account_info(local_block)
+            if creds:
+                return creds
+    except Exception as exc:
+        load_errors.append(f".streamlit/secrets.toml: {exc}")
+
     if os.path.isfile("service_account.json"):
         try:
             return Credentials.from_service_account_file(
@@ -112,12 +202,14 @@ def load_google_credentials():
         except Exception as exc:
             load_errors.append(f"service_account.json: {exc}")
 
+    found_keys = _streamlit_secret_top_level_keys()
+    keys_hint = ", ".join(found_keys) if found_keys else "(none — secrets empty or not saved)"
     hint = (
-        "On Streamlit Cloud: App settings → Secrets → paste the full TOML block "
-        "from `.streamlit/secrets.toml.example` (including [gcp_service_account]). "
-        "Then Reboot app. Share the sheet with the service account client_email."
+        "Streamlit Cloud → App settings → Secrets: paste the ENTIRE file "
+        "`.streamlit/secrets.toml` (must include [gcp_service_account] header). "
+        "Save → Reboot app. Share sheet with client_email."
     )
-    detail = "; ".join(load_errors) if load_errors else "no [gcp_service_account] in st.secrets"
+    detail = "; ".join(load_errors) if load_errors else f"st.secrets keys: {keys_hint}"
     raise FileNotFoundError(f"Google credentials missing. {hint} Details: {detail}")
 
 
@@ -678,20 +770,32 @@ inject_custom_css()
 creds_ok, creds_error = google_credentials_configured()
 if not creds_ok:
     st.error(creds_error)
-    with st.expander("Fix Streamlit Cloud secrets (copy into App settings → Secrets)"):
-        example_path = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)),
-            ".streamlit",
-            "secrets.toml.example",
-        )
-        try:
-            with open(example_path, encoding="utf-8") as f:
-                st.code(f.read(), language="toml")
-        except OSError:
+    found_keys = _streamlit_secret_top_level_keys()
+    st.warning(
+        f"Secrets detected in app: **{', '.join(found_keys) if found_keys else 'none'}**. "
+        "You must include the **`[gcp_service_account]`** section (not only GEMINI/EMAIL)."
+    )
+    with st.expander("Copy this into Streamlit Cloud → Settings → Secrets, then Reboot"):
+        base = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".streamlit")
+        for name in ("secrets.toml", "secrets.toml.example"):
+            path = os.path.join(base, name)
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    st.caption(f"From `{name}`:")
+                    st.code(handle.read(), language="toml")
+                    break
+            except OSError:
+                continue
+        else:
             st.markdown(
-                "Add `[gcp_service_account]` with all fields from your "
-                "`service_account.json` plus `GEMINI_API_KEY`, `EMAIL_USER`, `EMAIL_PASS`."
+                "Paste GEMINI_API_KEY, EMAIL_USER, EMAIL_PASS, and a full "
+                "`[gcp_service_account]` block from `service_account.json`."
             )
+        st.markdown(
+            "**Checklist:** `[gcp_service_account]` header on its own line · "
+            "multiline `private_key` in triple quotes · **Save** · **Reboot app** · "
+            "share sheet with `marcom@exponentia-project.iam.gserviceaccount.com`"
+        )
     st.stop()
 
 hero_left, hero_right = st.columns([1.1, 2.2], gap="large")
