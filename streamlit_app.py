@@ -142,147 +142,6 @@ def get_genai_client():
     return genai.Client(api_key=key)
 
 
-_COMMERCIAL_HINTS = (
-    "nrc", "mrc", "commercial", "quote id", "circuit", "mbps", "gbps",
-    "monthly", "one-time", "one time", "otc", "pricing", "proposal",
-    "contract term", "usd", "$", "rate",
-)
-
-_DATE_PARSE_FORMATS = (
-    "%B %d, %Y",
-    "%b %d, %Y",
-    "%d %B %Y",
-    "%d %b %Y",
-    "%a, %b %d, %Y",
-    "%A, %B %d, %Y",
-)
-
-
-def parse_email_date(date_str):
-    if not date_str:
-        return None
-    clean = re.sub(r"\s+", " ", date_str.split(" at ")[0].strip())
-    clean = re.sub(r"^\w+day,?\s+", "", clean, flags=re.IGNORECASE)
-    for fmt in _DATE_PARSE_FORMATS:
-        try:
-            return datetime.strptime(clean, fmt)
-        except ValueError:
-            continue
-    return None
-
-
-def is_team_sender(from_line, email_user):
-    """Exponentia mailbox or domain — commercials sent from team."""
-    if not from_line:
-        return False
-    _, addr = parseaddr(from_line)
-    addr = (addr or "").lower().strip()
-    user = (email_user or "").lower().strip()
-    if user and (addr == user or user in from_line.lower()):
-        return True
-    return is_exponentia_email(addr) or is_exponentia_name(from_line)
-
-
-def looks_like_commercials(text):
-    """Heuristic: team reply that likely contains pricing / quote table."""
-    if not text:
-        return False
-    lowered = text.lower()
-    return sum(1 for hint in _COMMERCIAL_HINTS if hint in lowered) >= 2
-
-
-def extract_thread_messages(body):
-    """Parse forwarded thread into dated messages with sender role."""
-    messages = []
-    for chunk in re.split(r"(?i)(?=From:\s*)", body):
-        chunk = chunk.strip()
-        if not chunk:
-            continue
-
-        from_line = ""
-        body_text = chunk
-        if re.match(r"(?i)From:\s*", chunk):
-            header_end = chunk.find("\n")
-            if header_end == -1:
-                from_line = re.sub(r"(?i)^From:\s*", "", chunk).strip()
-                body_text = ""
-            else:
-                from_line = re.sub(r"(?i)^From:\s*", "", chunk[:header_end]).strip()
-                body_text = chunk[header_end + 1 :]
-
-        sent_match = re.search(
-            r"Sent:\s*(?:\w+day,?\s+)?(.*?)(?:\s+\d{1,2}:\d{2}(?:\s*[AP]M)?|\s+\d{4})",
-            body_text,
-            re.IGNORECASE,
-        )
-        if not sent_match:
-            sent_match = re.search(r"Sent: .*?, (.*?) \d", body_text)
-
-        if not sent_match:
-            continue
-
-        sent_at = parse_email_date(sent_match.group(1))
-        if not sent_at:
-            continue
-
-        messages.append(
-            {
-                "date": sent_at,
-                "from": from_line,
-                "body": body_text,
-            }
-        )
-
-    return messages
-
-
-def extract_thread_dates(body, email_user):
-    """
-    Opportunity date: first partner email for this RFQ (RFQ received).
-    Proposal date: when Exponentia sends commercials / pricing to the customer.
-    """
-    messages = extract_thread_messages(body)
-    for msg in messages:
-        msg["is_team"] = is_team_sender(msg["from"], email_user)
-        msg["is_partner"] = bool(msg["from"]) and not msg["is_team"]
-
-    if not messages:
-        now = datetime.now()
-        return now, now
-
-    messages.sort(key=lambda m: m["date"])
-
-    partner_messages = [m for m in messages if m["is_partner"]]
-    if partner_messages:
-        opportunity_date = partner_messages[0]["date"]
-    else:
-        opportunity_date = messages[0]["date"]
-
-    team_after_opp = [
-        m for m in messages
-        if m["is_team"] and m["date"].date() >= opportunity_date.date()
-    ]
-    commercial_replies = [m for m in team_after_opp if looks_like_commercials(m["body"])]
-
-    if commercial_replies:
-        proposal_date = commercial_replies[0]["date"]
-    elif team_after_opp:
-        proposal_date = team_after_opp[0]["date"]
-    else:
-        proposal_date = opportunity_date
-
-    if proposal_date.date() < opportunity_date.date():
-        proposal_date = opportunity_date
-
-    return opportunity_date, proposal_date
-
-
-def calculate_tat(opportunity_date, proposal_date):
-    """Days from RFQ receipt to commercials sent, excluding the receipt day."""
-    delta_days = (proposal_date.date() - opportunity_date.date()).days
-    return max(0, delta_days - 1)
-
-
 def parse_currency_number(value):
     if value is None:
         return None
@@ -530,94 +389,44 @@ def normalize_partner_name(partner, email_from=None):
     return "-"
 
 
-def extract_contract_term_labels(text):
-    """Find distinct contract terms like 12/24/36 months in a single string."""
-    if not text:
-        return []
-    labels = []
-    seen = set()
-    for match in re.finditer(
-        r"\b(12|24|36|48|60)\s*(?:month|months|mo\.?|mths?)\b",
-        str(text),
-        re.IGNORECASE,
-    ):
-        label = f"{match.group(1)} Months"
-        key = match.group(1)
-        if key not in seen:
-            seen.add(key)
-            labels.append(label)
-    return labels
+def format_ai_sheet_dates(opp_str, prop_str):
+    """Parse Gemini YYYY-MM-DD dates; return sheet dates (dd-Month-yyyy) and TAT."""
+    tat = 0
+    now_fmt = datetime.now().strftime(SHEET_DATE_FORMAT)
+    try:
+        opp_date = datetime.strptime((opp_str or "").strip(), "%Y-%m-%d")
+        prop_date = datetime.strptime((prop_str or "").strip(), "%Y-%m-%d")
+        tat = max(0, (prop_date - opp_date).days - 1)
+        return opp_date.strftime(SHEET_DATE_FORMAT), prop_date.strftime(SHEET_DATE_FORMAT), tat
+    except ValueError:
+        opp_fmt = format_sheet_date(opp_str) if opp_str else now_fmt
+        prop_fmt = format_sheet_date(prop_str) if prop_str else now_fmt
+        return opp_fmt, prop_fmt, tat
 
 
-def split_currency_values(value):
-    """Pull multiple $ amounts from one cell (e.g. multi-term pricing columns)."""
-    if value is None:
-        return []
-    text = str(value).strip()
-    if not text or text == "-":
-        return []
-    amounts = re.findall(r"\$[\d,]+(?:\.\d{2})?", text)
-    if not amounts:
-        amounts = re.findall(r"(?<!\d)(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d{2})(?!\d)", text)
-    return amounts
-
-
-def expand_circuits_by_contract_terms(circuits):
-    """
-    One sheet row per contract term. When a table row lists 12/24/36 month
-    pricing together, split into separate entries with matching NRC/MRC when possible.
-    """
-    expanded = []
-    for circuit in circuits:
-        terms = extract_contract_term_labels(circuit.get("Contract Terms", ""))
-        if len(terms) <= 1:
-            expanded.append(circuit)
-            continue
-
-        mrc_values = split_currency_values(circuit.get("MRC"))
-        nrc_values = split_currency_values(circuit.get("NRC"))
-
-        for index, term in enumerate(terms):
-            row = dict(circuit)
-            row["Contract Terms"] = term
-            if index < len(mrc_values):
-                row["MRC"] = mrc_values[index]
-            if index < len(nrc_values):
-                row["NRC"] = nrc_values[index]
-            expanded.append(row)
-
-    return expanded
-
-
-def get_ai_extraction(email_body):
+def get_ai_extraction(email_body, email_user):
+    """Gemini extracts circuits, dates, formatting, and business rules from the thread."""
     prompt = f"""
-    You are an expert telecom data verification entity. Extract quoting matrix rows into clean structured objects.
+    You are an expert telecom data verification entity. Analyze the email thread and extract quoting matrix rows into clean structured objects.
 
-    CRITICAL ALIGNMENT RULES:
-    1. Quote ID: Must look for a clean tracking identifier format matching expressions like 'I698-26' or 'F780-23'. Do NOT extract subject titles or overall RFQ names.
-    2. Capacity / Quantity: Must explicitly state the metric unit. E.g., change '50' or '20' into '50 Mbps' or '20 Gbps'.
-    3. Strict Tech/Service Mapping: You MUST conform to this relational taxonomy precisely:
+    CRITICAL ALIGNMENT & TAXONOMY RULES:
+    1. Quote ID: Extract tracking identifier format matching expressions like 'I698-26' or 'F780-23'. Do NOT extract subject titles.
+    2. Opportunity Date: The oldest date/timestamp when the partner first requested the quote (RFQ received). Format strictly as YYYY-MM-DD.
+    3. Proposal Date: The date/timestamp when our team ({email_user}) sent pricing/proposal/commercials. If not sent yet, use the opportunity date. Format strictly as YYYY-MM-DD.
+    4. Capacity / Quantity: State the metric unit explicitly (e.g., '50 Mbps', '20 Gbps').
+    5. Currency Formatting: NRC and MRC must include '$' and commas (e.g., '$1,500.00'). If none, write '-'.
+    6. Strict Tech/Service Taxonomy Mapping:
        - If Service is DIA or BIA -> Technology MUST be 'Internet'
        - If Service is L2VPN or MPLS -> Technology MUST be 'Ethernet'
        - If Service is IPLC, IEPL, EoSDH, DPLC, or DEPL -> Technology MUST be 'TDM'
        - If Service is Colocation + PWR -> Technology MUST be 'Datacenter'
        - If Service is Cross Connects, Equipment, or Field Support -> Technology MUST be 'Managed Services / Hardware'
-    4. Media: MUST be exactly 'Fiber' or 'Wireless' only (no other values). Use 'Fiber' for fiber/FTTH/ethernet over fiber; use 'Wireless' for radio/microwave/fixed wireless/LTE.
-    5. Partner Name vs End Customer (these are DIFFERENT columns — do not confuse them):
-       - Partner Name: The external company that EMAILS Exponentia Global to request a quote (channel partner, reseller, agent).
-         Example: 'Noor Data Network'. MUST NEVER be 'Exponentia Global' (we are the provider).
-       - End Customer: The final client organization the partner is quoting for (brought by the partner to Exponentia).
-         Example: 'Baker Hughes'. A partner can bring many different end customers.
-       - Do NOT put End Customer into Partner Name. Do NOT put Exponentia Global into Partner Name.
-    6. Contract Terms — one row per term (CRITICAL for pricing tables):
-       - If a single table row shows multiple contract terms (e.g. columns or cells for
-         12 month, 24 month, 36 month), you MUST output a SEPARATE object for EACH term.
-       - Do NOT combine 12/24/36 into one object or one Contract Terms field.
-       - Each object keeps the same circuit details (Quote ID, sites, technology, service,
-         capacity, partner, end customer, etc.) but exactly ONE Contract Terms value
-         (e.g. '12 Months', '24 Months', '36 Months').
-       - NRC and MRC must be the values for THAT term only (from that column/cell), not
-         a combined list of all terms.
+    7. Media: MUST be exactly 'Fiber' or 'Wireless' only.
+    8. Partner Name vs End Customer:
+       - Partner Name: External entity emailing Exponentia Global (e.g., 'Noor Data Network'). NEVER 'Exponentia Global'.
+       - End Customer: Final client the partner quotes for (e.g., 'Baker Hughes').
+    9. Contract Terms Expansion (One Object Per Term):
+       - If one table row lists 12, 24, and 36 month terms, output a SEPARATE object for EACH term with that term's NRC/MRC.
 
     EMAIL THREAD FOR PROCESSING:
     {email_body}
@@ -629,38 +438,46 @@ def get_ai_extraction(email_body):
         config={
             'response_mime_type': 'application/json',
             'response_schema': {
-                'type': 'ARRAY',
-                'items': {
-                    'type': 'OBJECT',
-                    'properties': {
-                        'Quote ID': {'type': 'STRING'},
-                        'Partner Name': {'type': 'STRING'},
-                        'End Customer': {'type': 'STRING'},
-                        'Site A': {'type': 'STRING'},
-                        'Site A City': {'type': 'STRING'},
-                        'Site B': {'type': 'STRING'},
-                        'Site B City': {'type': 'STRING'},
-                        'Technology': {'type': 'STRING'},
-                        'Service/Product': {'type': 'STRING'},
-                        'Capacity / Quantity': {'type': 'STRING'},
-                        'NRC': {'type': 'STRING'},
-                        'MRC': {'type': 'STRING'},
-                        'Contract Terms': {'type': 'STRING'},
-                        'Sales Effort By': {'type': 'STRING'},
-                        'Comments': {'type': 'STRING'},
-                        'POC': {'type': 'STRING'},
-                        'Contact Email Address': {'type': 'STRING'},
-                        'On-Net/Off-Net': {'type': 'STRING'},
-                        'LM Infra Details': {'type': 'STRING'},
-                        'Media': {'type': 'STRING'},
+                'type': 'OBJECT',
+                'properties': {
+                    'circuits': {
+                        'type': 'ARRAY',
+                        'items': {
+                            'type': 'OBJECT',
+                            'properties': {
+                                'Quote ID': {'type': 'STRING'},
+                                'Opportunity Date': {'type': 'STRING'},
+                                'Proposal Date': {'type': 'STRING'},
+                                'Partner Name': {'type': 'STRING'},
+                                'End Customer': {'type': 'STRING'},
+                                'Site A': {'type': 'STRING'},
+                                'Site A City': {'type': 'STRING'},
+                                'Site B': {'type': 'STRING'},
+                                'Site B City': {'type': 'STRING'},
+                                'Technology': {'type': 'STRING'},
+                                'Service/Product': {'type': 'STRING'},
+                                'Capacity / Quantity': {'type': 'STRING'},
+                                'NRC': {'type': 'STRING'},
+                                'MRC': {'type': 'STRING'},
+                                'Contract Terms': {'type': 'STRING'},
+                                'Sales Effort By': {'type': 'STRING'},
+                                'Comments': {'type': 'STRING'},
+                                'POC': {'type': 'STRING'},
+                                'Contact Email Address': {'type': 'STRING'},
+                                'On-Net/Off-Net': {'type': 'STRING'},
+                                'LM Infra Details': {'type': 'STRING'},
+                                'Media': {'type': 'STRING'},
+                            },
+                            'required': [
+                                'Quote ID', 'Opportunity Date', 'Proposal Date', 'Partner Name',
+                                'Technology', 'Service/Product', 'Capacity / Quantity', 'NRC', 'MRC', 'Media',
+                            ],
+                        },
                     },
-                    'required': [
-                        'Quote ID', 'Partner Name', 'Technology', 'Service/Product',
-                        'Capacity / Quantity', 'NRC', 'MRC', 'Media'
-                    ]
-                }
-            }
-        }
+                },
+                'required': ['circuits'],
+            },
+        },
     )
     return json.loads(response.text)
 
@@ -681,12 +498,12 @@ def run_bot():
         mail.login(email_user, email_pass)
         mail.select("inbox")
         _, messages = mail.search(None, 'UNSEEN')
-
-        new_rows = []
         email_ids = messages[0].split()
 
         if not email_ids:
-            return "No unread items found. Mark a quote email thread as 'Unread' to test."
+            return "No new (unread) emails found. Mark a quote email as 'Unread' to test."
+
+        new_rows = []
 
         for num in email_ids:
             _, data = mail.fetch(num, '(RFC822)')
@@ -701,26 +518,30 @@ def run_bot():
             else:
                 body = msg.get_payload(decode=True).decode(errors='ignore')
 
-            opp_date, prop_date = extract_thread_dates(body, email_user)
-            tat = calculate_tat(opp_date, prop_date)
-
-            circuits = expand_circuits_by_contract_terms(get_ai_extraction(body))
+            ai_data = get_ai_extraction(body, email_user)
+            circuits = ai_data.get('circuits', [])
+            if isinstance(circuits, dict):
+                circuits = [circuits]
 
             for c in circuits:
-                lm_infra = c.get('LM Infra Details', '-')
+                opp_formatted, prop_formatted, tat = format_ai_sheet_dates(
+                    c.get('Opportunity Date', ''),
+                    c.get('Proposal Date', ''),
+                )
+                lm_infra = c.get('LM Infra Details', '-') or '-'
                 media = normalize_media(c.get('Media'), lm_infra)
-                end_customer = c.get('End Customer', '-')
                 partner_name = normalize_partner_name(c.get('Partner Name'), email_from)
+
                 new_rows.append([
-                    last_s_no, c.get('Quote ID', '-'), format_sheet_date(opp_date),
-                    partner_name, end_customer, c.get('Site A', '-'),
+                    last_s_no, c.get('Quote ID', '-'), opp_formatted,
+                    partner_name, c.get('End Customer', '-'), c.get('Site A', '-'),
                     c.get('Site A City', '-'), c.get('Site B', '-'), c.get('Site B City', '-'),
                     c.get('Technology', '-'), c.get('Service/Product', '-'), c.get('Capacity / Quantity', '-'),
-                    format_currency(c.get('NRC')), format_currency(c.get('MRC')), 'Email', format_sheet_date(prop_date),
+                    format_currency(c.get('NRC')), format_currency(c.get('MRC')), 'Email', prop_formatted,
                     c.get('Contract Terms', '-'), c.get('Sales Effort By', '-'), c.get('Comments', '-'),
                     'OPEN', 'MEDIUM', c.get('POC', '-'), c.get('Contact Email Address', '-'),
                     tat, c.get('On-Net/Off-Net', '-'), lm_infra,
-                    'Unprotected', media, '-', 'New Service'
+                    'Unprotected', media, '-', 'New Service',
                 ])
                 last_s_no += 1
 
@@ -743,9 +564,9 @@ def run_bot():
                 )
             except Exception:
                 pass
-            return f"✅ Success! Processed and added {len(new_rows)} structured rows to the Funnel."
+            return f"✅ Success! Added {len(new_rows)} perfectly structured rows to the Google Sheet!"
 
-        return "Unread emails processed, but no circuit rows were extracted by Gemini."
+        return "Unread emails processed, but no valid data structures were detected by Gemini."
 
     except imaplib.IMAP4.error as e:
         return f"Gmail Login Failed: Make sure your App Password is correct and has no spaces. Error: {e}"
@@ -765,9 +586,9 @@ INVEXAL_LOGO = "https://invexal.com/wp-content/uploads/2023/07/Invexal-Logo-01-1
 GEMINI_LOGO = "https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg"
 GMAIL_LOGO = "https://www.gstatic.com/images/branding/product/2x/gmail_2020q4_48dp.png"
 SHEETS_LOGO = "https://www.gstatic.com/images/branding/product/2x/sheets_2020q4_48dp.png"
-GITHUB_REPO_URL = "https://github.com/marcominvexal/ExponentiaBot"
+GITHUB_REPO_URL = "https://github.com/marcominvexal/expo"
 STREAMLIT_DEPLOY_URL = (
-    "https://share.streamlit.io/deploy?repository=marcominvexal/ExponentiaBot"
+    "https://share.streamlit.io/deploy?repository=marcominvexal/expo"
     "&branch=main&mainModule=streamlit_app.py"
 )
 
