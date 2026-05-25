@@ -405,28 +405,36 @@ def format_ai_sheet_dates(opp_str, prop_str):
 
 
 def get_ai_extraction(email_body, email_user):
-    """Gemini extracts circuits, dates, formatting, and business rules from the thread."""
+    """Delegates data extraction, smart RFQ-specific dates, and business logic to Gemini."""
     prompt = f"""
     You are an expert telecom data verification entity. Analyze the email thread and extract quoting matrix rows into clean structured objects.
 
     CRITICAL ALIGNMENT & TAXONOMY RULES:
     1. Quote ID: Extract tracking identifier format matching expressions like 'I698-26' or 'F780-23'. Do NOT extract subject titles.
-    2. Opportunity Date: The oldest date/timestamp when the partner first requested the quote (RFQ received). Format strictly as YYYY-MM-DD.
-    3. Proposal Date: The date/timestamp when our team ({email_user}) sent pricing/proposal/commercials. If not sent yet, use the opportunity date. Format strictly as YYYY-MM-DD.
+
+    2. Opportunity Date (SMART RFQ DETECTION):
+       - Do NOT blindly select the absolute oldest timestamp in the thread if the email loop contains long historical discussions, greetings, or older unrelated topics.
+       - Instead, locate the exact email where the partner/customer explicitly submitted this specific RFQ/request for the quoted circuits.
+       - Specifically, pinpoint the customer message immediately preceding our team's pricing/proposal response. This ensures that the Turnaround Time (TAT) strictly tracks our active response window and stays as minimal and accurate as possible.
+       - Format strictly as YYYY-MM-DD.
+
+    3. Proposal Date: Contextually find the date/timestamp when our team ({email_user}) sent the pricing/proposal response. If no pricing has been sent yet, fallback to the opportunity date. Format strictly as YYYY-MM-DD.
+
     4. Capacity / Quantity: State the metric unit explicitly (e.g., '50 Mbps', '20 Gbps').
-    5. Currency Formatting: NRC and MRC must include '$' and commas (e.g., '$1,500.00'). If none, write '-'.
+    5. Currency Formatting: Ensure NRC and MRC fields include the '$' symbol and correct commas (e.g., '$1,500.00'). If none, write '-'.
     6. Strict Tech/Service Taxonomy Mapping:
        - If Service is DIA or BIA -> Technology MUST be 'Internet'
        - If Service is L2VPN or MPLS -> Technology MUST be 'Ethernet'
        - If Service is IPLC, IEPL, EoSDH, DPLC, or DEPL -> Technology MUST be 'TDM'
        - If Service is Colocation + PWR -> Technology MUST be 'Datacenter'
        - If Service is Cross Connects, Equipment, or Field Support -> Technology MUST be 'Managed Services / Hardware'
-    7. Media: MUST be exactly 'Fiber' or 'Wireless' only.
+    7. Media: MUST be exactly 'Fiber' or 'Wireless' only. Detect contextually from text or LM details.
     8. Partner Name vs End Customer:
-       - Partner Name: External entity emailing Exponentia Global (e.g., 'Noor Data Network'). NEVER 'Exponentia Global'.
-       - End Customer: Final client the partner quotes for (e.g., 'Baker Hughes').
+       - Partner Name: The external entity emailing Exponentia Global to request a quote (e.g., 'Noor Data Network'). NEVER set this to 'Exponentia Global'.
+       - End Customer: The final client organization the partner is quoting for (e.g., 'Baker Hughes').
     9. Contract Terms Expansion (One Object Per Term):
-       - If one table row lists 12, 24, and 36 month terms, output a SEPARATE object for EACH term with that term's NRC/MRC.
+       - If a single table row lists multiple contract terms (e.g. columns for 12, 24, and 36 months), you MUST output a SEPARATE object for EACH term.
+       - Each separate object maintains duplicate circuit details but lists exactly ONE distinct Contract Term (e.g., '12 Months') and its corresponding unique NRC/MRC values.
 
     EMAIL THREAD FOR PROCESSING:
     {email_body}
