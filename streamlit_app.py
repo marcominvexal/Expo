@@ -3,15 +3,17 @@ import imaplib
 import email
 from email.utils import parseaddr
 import json
-import random
 import re
 import time
 import gspread
 import streamlit as st
+import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from google import genai
 from google.oauth2.service_account import Credentials
+
+from ui_retry_animations import SYNC_SUCCESS_CHARACTER_HTML, gemini_retry_wait_html
 
 # Local secrets (Streamlit Cloud uses st.secrets instead)
 load_dotenv("secrets.env", override=True)
@@ -561,7 +563,7 @@ def _is_retryable_gemini_error(exc):
 
 
 def get_ai_extraction(email_body, email_user):
-    """Extracts quoting data with automatic retries for temporary Gemini overload (503/429)."""
+    """Extract data with a 60s retry loop and animated wait UI on 503/429."""
     prompt = f"""
     You are an expert telecom data verification engine. Analyze the email thread and extract quoting matrix rows into clean structured objects.
 
@@ -571,7 +573,7 @@ def get_ai_extraction(email_body, email_user):
     2. Opportunity Date (HYPER-MINIMAL TAT LOGIC):
        - OBJECTIVE: Calculate the absolute lowest logically defensible Turnaround Time (TAT) for our sales engineering execution.
        - RULE A (Scope Isolation): Look at the exact circuits listed in the final pricing table. If the email thread began days or weeks earlier discussing a completely different country, city, or independent RFQ scope, you MUST completely ignore those older dates.
-       - RULE B (The Actionable Milestone Pivot): Do NOT default to the initial incoming email if our team was operationally blocked. If our team replied asking for missing prerequisites (like LPOC details, specific customer names, or explicit capacities) to proceed, the clock does NOT start at the beginning. Instead, set the 'Opportunity Date' to the exact date when the requirement became actively scoped, or when the customer provided the final clarity needed to process the engineering feasibility (e.g., if a loop for a new country scope actively formalizes on Friday, May 8, 2026, select 2026-05-08).
+       - RULE B (The Actionable Milestone Pivot): Do NOT default to the initial incoming email if our team was operationally blocked. If our team replied asking for missing prerequisites (like LPOC details, specific customer names, or explicit capacities) to proceed, the clock does NOT start at the beginning. Instead, set the 'Opportunity Date' to the exact date when the requirement became actively scoped, or when the customer provided the final clarity needed to process the engineering feasibility.
        - RULE C (Eliminate Trailing Idle Days): Ensure no dead time spent waiting on customer definition parameters is unfairly charged against our turnaround performance metric.
        - Format strictly as YYYY-MM-DD.
 
@@ -596,10 +598,12 @@ def get_ai_extraction(email_body, email_user):
     {email_body}
     """
 
-    max_retries = 4
-    base_delay = 2
+    start_overall_time = time.time()
+    attempt_count = 0
+    anim_placeholder = st.empty()
+    retry_limit_seconds = 60
 
-    for attempt in range(max_retries):
+    while (time.time() - start_overall_time) < retry_limit_seconds:
         try:
             response = get_genai_client().models.generate_content(
                 model="gemini-2.5-flash",
@@ -609,21 +613,34 @@ def get_ai_extraction(email_body, email_user):
                     'response_schema': GEMINI_CIRCUITS_SCHEMA,
                 },
             )
+            anim_placeholder.empty()
             return json.loads(response.text)
         except Exception as exc:
-            if _is_retryable_gemini_error(exc) and attempt < max_retries - 1:
-                sleep_duration = (base_delay ** attempt) + random.uniform(0.5, 1.5)
-                try:
-                    st.toast(
-                        f"Gemini is busy. Retrying in {sleep_duration:.1f}s "
-                        f"(attempt {attempt + 1}/{max_retries})",
-                        icon="⏳",
-                    )
-                except Exception:
-                    pass
-                time.sleep(sleep_duration)
-                continue
-            raise
+            if not _is_retryable_gemini_error(exc):
+                anim_placeholder.empty()
+                raise
+
+            time_elapsed = time.time() - start_overall_time
+            time_remaining_total = max(0, int(retry_limit_seconds - time_elapsed))
+            if time_remaining_total <= 0:
+                anim_placeholder.empty()
+                raise exc
+
+            sleep_interval = min(6 + (attempt_count * 3), time_remaining_total)
+            attempt_count += 1
+
+            for remaining_seconds in range(int(sleep_interval), 0, -1):
+                current_total_left = max(0, int(retry_limit_seconds - (time.time() - start_overall_time)))
+                anim_placeholder.markdown(
+                    gemini_retry_wait_html(remaining_seconds, current_total_left),
+                    unsafe_allow_html=True,
+                )
+                time.sleep(1)
+
+    anim_placeholder.empty()
+    raise TimeoutError(
+        "Gemini Engine overloaded. System timed out automatically after retrying for 1 minute."
+    )
 
 
 def run_bot():
@@ -885,6 +902,8 @@ with sync_col:
             result = run_bot()
             if result and "Success" in result:
                 st.success(result)
+                st.balloons()
+                components.html(SYNC_SUCCESS_CHARACTER_HTML, height=240)
             else:
                 st.error(result or "Unknown error.")
 with format_col:
