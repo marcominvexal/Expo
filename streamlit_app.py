@@ -3,7 +3,9 @@ import imaplib
 import email
 from email.utils import parseaddr
 import json
+import random
 import re
+import time
 import gspread
 import streamlit as st
 from datetime import datetime, timedelta
@@ -511,8 +513,55 @@ def format_ai_sheet_dates(opp_str, prop_str):
         return opp_fmt, prop_fmt, tat
 
 
+GEMINI_CIRCUITS_SCHEMA = {
+    'type': 'OBJECT',
+    'properties': {
+        'circuits': {
+            'type': 'ARRAY',
+            'items': {
+                'type': 'OBJECT',
+                'properties': {
+                    'Quote ID': {'type': 'STRING'},
+                    'Opportunity Date': {'type': 'STRING'},
+                    'Proposal Date': {'type': 'STRING'},
+                    'Partner Name': {'type': 'STRING'},
+                    'End Customer': {'type': 'STRING'},
+                    'Site A': {'type': 'STRING'},
+                    'Site A City': {'type': 'STRING'},
+                    'Site B': {'type': 'STRING'},
+                    'Site B City': {'type': 'STRING'},
+                    'Technology': {'type': 'STRING'},
+                    'Service/Product': {'type': 'STRING'},
+                    'Capacity / Quantity': {'type': 'STRING'},
+                    'NRC': {'type': 'STRING'},
+                    'MRC': {'type': 'STRING'},
+                    'Contract Terms': {'type': 'STRING'},
+                    'Sales Effort By': {'type': 'STRING'},
+                    'Comments': {'type': 'STRING'},
+                    'POC': {'type': 'STRING'},
+                    'Contact Email Address': {'type': 'STRING'},
+                    'On-Net/Off-Net': {'type': 'STRING'},
+                    'LM Infra Details': {'type': 'STRING'},
+                    'Media': {'type': 'STRING'},
+                },
+                'required': [
+                    'Quote ID', 'Opportunity Date', 'Proposal Date', 'Partner Name',
+                    'Technology', 'Service/Product', 'Capacity / Quantity', 'NRC', 'MRC', 'Media',
+                ],
+            },
+        },
+    },
+    'required': ['circuits'],
+}
+
+
+def _is_retryable_gemini_error(exc):
+    error_str = str(exc).upper()
+    return any(token in error_str for token in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"))
+
+
 def get_ai_extraction(email_body, email_user):
-    """Delegates data extraction, smart RFQ-specific dates, and business logic to Gemini."""
+    """Extracts quoting data with automatic retries for temporary Gemini overload (503/429)."""
     prompt = f"""
     You are an expert telecom data verification engine. Analyze the email thread and extract quoting matrix rows into clean structured objects.
 
@@ -547,54 +596,34 @@ def get_ai_extraction(email_body, email_user):
     {email_body}
     """
 
-    response = get_genai_client().models.generate_content(
-        model="gemini-2.5-flash",
-        contents=prompt,
-        config={
-            'response_mime_type': 'application/json',
-            'response_schema': {
-                'type': 'OBJECT',
-                'properties': {
-                    'circuits': {
-                        'type': 'ARRAY',
-                        'items': {
-                            'type': 'OBJECT',
-                            'properties': {
-                                'Quote ID': {'type': 'STRING'},
-                                'Opportunity Date': {'type': 'STRING'},
-                                'Proposal Date': {'type': 'STRING'},
-                                'Partner Name': {'type': 'STRING'},
-                                'End Customer': {'type': 'STRING'},
-                                'Site A': {'type': 'STRING'},
-                                'Site A City': {'type': 'STRING'},
-                                'Site B': {'type': 'STRING'},
-                                'Site B City': {'type': 'STRING'},
-                                'Technology': {'type': 'STRING'},
-                                'Service/Product': {'type': 'STRING'},
-                                'Capacity / Quantity': {'type': 'STRING'},
-                                'NRC': {'type': 'STRING'},
-                                'MRC': {'type': 'STRING'},
-                                'Contract Terms': {'type': 'STRING'},
-                                'Sales Effort By': {'type': 'STRING'},
-                                'Comments': {'type': 'STRING'},
-                                'POC': {'type': 'STRING'},
-                                'Contact Email Address': {'type': 'STRING'},
-                                'On-Net/Off-Net': {'type': 'STRING'},
-                                'LM Infra Details': {'type': 'STRING'},
-                                'Media': {'type': 'STRING'},
-                            },
-                            'required': [
-                                'Quote ID', 'Opportunity Date', 'Proposal Date', 'Partner Name',
-                                'Technology', 'Service/Product', 'Capacity / Quantity', 'NRC', 'MRC', 'Media',
-                            ],
-                        },
-                    },
+    max_retries = 4
+    base_delay = 2
+
+    for attempt in range(max_retries):
+        try:
+            response = get_genai_client().models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt,
+                config={
+                    'response_mime_type': 'application/json',
+                    'response_schema': GEMINI_CIRCUITS_SCHEMA,
                 },
-                'required': ['circuits'],
-            },
-        },
-    )
-    return json.loads(response.text)
+            )
+            return json.loads(response.text)
+        except Exception as exc:
+            if _is_retryable_gemini_error(exc) and attempt < max_retries - 1:
+                sleep_duration = (base_delay ** attempt) + random.uniform(0.5, 1.5)
+                try:
+                    st.toast(
+                        f"Gemini is busy. Retrying in {sleep_duration:.1f}s "
+                        f"(attempt {attempt + 1}/{max_retries})",
+                        icon="⏳",
+                    )
+                except Exception:
+                    pass
+                time.sleep(sleep_duration)
+                continue
+            raise
 
 
 def run_bot():
