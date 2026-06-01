@@ -626,7 +626,7 @@ def get_ai_extraction(email_body, email_user):
                 anim_placeholder.empty()
                 raise exc
 
-            sleep_interval = min(6 + (attempt_count * 3), time_remaining_total)
+            sleep_interval = min(5 + (attempt_count * 2), time_remaining_total)
             attempt_count += 1
 
             for remaining_seconds in range(int(sleep_interval), 0, -1):
@@ -903,7 +903,7 @@ with sync_col:
             if result and "Success" in result:
                 st.success(result)
                 st.balloons()
-                components.html(SYNC_SUCCESS_CHARACTER_HTML, height=240)
+                components.html(SYNC_SUCCESS_CHARACTER_HTML, height=270)
             else:
                 st.error(result or "Unknown error.")
 with format_col:

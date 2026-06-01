@@ -3,297 +3,335 @@
 
 def gemini_retry_wait_html(remaining_seconds, total_timeout_left):
     return f"""
-    <div class="wait-frame">
-        <div class="status-msg">
-            ⏳ <strong>Gemini is busy (503 Error).</strong><br>
-            Retrying in <span class="highlight">{remaining_seconds}s</span>...
-            (Total timeout limit: {total_timeout_left}s remaining)
+    <div class="hd-wait-container">
+        <div class="hd-status">
+            <span class="pulse-dot"></span>
+            <strong>Gemini is experiencing heavy load.</strong>
+            Retrying in <span>{remaining_seconds}s</span>
+            ({total_timeout_left}s total backup time left)
         </div>
-        <div class="animation-stage">
-            <div class="cartoon-walker">
-                <div class="antenna-dot"></div>
-                <div class="antenna-line"></div>
-                <div class="robot-head"><div class="visor"></div></div>
-                <div class="robot-body"><div class="heartbeat"></div></div>
-                <div class="robot-legs">
-                    <div class="leg left-leg"></div>
-                    <div class="leg right-leg"></div>
+        <div class="hd-stage">
+            <div class="hd-walker">
+                <div class="hd-antenna">
+                    <div class="hd-bulb"></div>
+                    <div class="hd-stem"></div>
                 </div>
+                <div class="hd-head">
+                    <div class="hd-glass-visor">
+                        <div class="hd-eye-glow"></div>
+                        <div class="hd-eye-glow"></div>
+                    </div>
+                </div>
+                <div class="hd-body"><div class="hd-dial"></div></div>
+                <div class="hd-legs">
+                    <div class="hd-leg hd-left"></div>
+                    <div class="hd-leg hd-right"></div>
+                </div>
+                <div class="hd-shadow"></div>
             </div>
         </div>
     </div>
     <style>
-        @keyframes bobbing {{
-            0% {{ transform: translateY(0px); }}
-            100% {{ transform: translateY(-8px); }}
+        @keyframes hd-bounce {{
+            0% {{ transform: translateY(0px) scale(1); }}
+            50% {{ transform: translateY(-12px) scale(0.98); }}
+            100% {{ transform: translateY(0px) scale(1); }}
         }}
-        @keyframes swingingLeft {{
-            0% {{ transform: rotate(-28deg); }}
-            100% {{ transform: rotate(28deg); }}
+        @keyframes hd-walk-L {{
+            0% {{ transform: rotate(-30deg); }}
+            100% {{ transform: rotate(30deg); }}
         }}
-        @keyframes swingingRight {{
-            0% {{ transform: rotate(28deg); }}
-            100% {{ transform: rotate(-28deg); }}
+        @keyframes hd-walk-R {{
+            0% {{ transform: rotate(30deg); }}
+            100% {{ transform: rotate(-30deg); }}
         }}
-        @keyframes pulse {{
-            0%, 100% {{ background: #FF4C4C; }}
-            50% {{ background: #FFFF00; }}
+        @keyframes eye-shimmer {{
+            0%, 100% {{ opacity: 0.7; box-shadow: 0 0 8px #FF4B4B; }}
+            50% {{ opacity: 1; box-shadow: 0 0 16px #FF4B4B; }}
         }}
-        .wait-frame {{
+        .hd-wait-container {{
+            background: linear-gradient(135deg, #1E1E2F 0%, #11111D 100%);
+            border: 2px solid #2A2A40;
+            border-radius: 20px;
+            padding: 24px;
+            box-shadow: 0 12px 40px rgba(0,0,0,0.3);
+            font-family: system-ui, -apple-system, sans-serif;
+            color: #E2E8F0;
+        }}
+        .hd-status {{
             display: flex;
-            flex-direction: column;
             align-items: center;
             justify-content: center;
-            background: #F9F9FB;
-            border: 3px dashed #4DEEEA;
-            border-radius: 16px;
-            padding: 22px;
-            margin: 15px 0;
-            box-shadow: 0px 4px 12px rgba(0,0,0,0.05);
-        }}
-        .status-msg {{
-            font-family: 'Comic Sans MS', sans-serif;
-            font-size: 15px;
-            color: #2C3E50;
+            gap: 10px;
+            font-size: 14px;
+            letter-spacing: 0.5px;
             text-align: center;
-            line-height: 1.6;
-            margin-bottom: 20px;
+            flex-wrap: wrap;
         }}
-        .highlight {{
-            color: #FF4C4C;
-            font-weight: bold;
-            font-size: 18px;
+        .hd-status span {{ color: #4DEEEA; font-weight: 700; }}
+        .pulse-dot {{
+            width: 8px;
+            height: 8px;
+            background: #FF4B4B;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #FF4B4B;
+            animation: eye-shimmer 1s infinite alternate;
+            flex-shrink: 0;
         }}
-        .animation-stage {{
-            height: 110px;
+        .hd-stage {{
+            height: 140px;
             display: flex;
             align-items: flex-end;
             justify-content: center;
-            width: 100%;
+            position: relative;
+            margin-top: 15px;
         }}
-        .cartoon-walker {{
+        .hd-walker {{
             display: flex;
             flex-direction: column;
             align-items: center;
-            animation: bobbing 0.45s ease-in-out infinite alternate;
+            animation: hd-bounce 0.5s ease-in-out infinite;
         }}
-        .antenna-dot {{
-            width: 8px;
-            height: 8px;
-            background: #FF4C4C;
-            border: 2px solid #000;
+        .hd-antenna {{
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }}
+        .hd-bulb {{
+            width: 10px;
+            height: 10px;
+            background: linear-gradient(135deg, #FF4B4B, #B30000);
             border-radius: 50%;
-            animation: pulse 0.3s infinite;
+            box-shadow: 0 0 12px #FF4B4B;
         }}
-        .antenna-line {{
-            width: 3px;
-            height: 8px;
-            background: #000;
+        .hd-stem {{ width: 3px; height: 10px; background: #515170; }}
+        .hd-head {{
+            width: 56px;
+            height: 42px;
+            background: linear-gradient(135deg, #4DEEEA 0%, #20A4A1 100%);
+            border-radius: 14px;
+            padding: 3px;
+            box-shadow: inset 0 2px 4px rgba(255,255,255,0.4), 0 4px 10px rgba(0,0,0,0.3);
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }}
-        .robot-head {{
-            width: 44px;
-            height: 32px;
-            background: #4DEEEA;
-            border: 3px solid #000;
+        .hd-glass-visor {{
+            width: 100%;
+            height: 100%;
+            background: rgba(15, 23, 42, 0.8);
             border-radius: 10px;
             display: flex;
             align-items: center;
             justify-content: center;
+            gap: 10px;
         }}
-        .visor {{
-            width: 30px;
-            height: 8px;
-            background: #000;
-            border-radius: 4px;
-            position: relative;
-        }}
-        .visor::after {{
-            content: '';
-            position: absolute;
-            left: 4px;
-            top: 2px;
-            width: 4px;
-            height: 4px;
-            background: #FFF;
+        .hd-eye-glow {{
+            width: 10px;
+            height: 10px;
+            background: #FF4B4B;
             border-radius: 50%;
+            animation: eye-shimmer 0.5s infinite alternate;
         }}
-        .robot-body {{
-            width: 50px;
-            height: 40px;
-            background: #FFDE4D;
-            border: 3px solid #000;
-            border-radius: 6px;
-            margin-top: -2px;
+        .hd-body {{
+            width: 64px;
+            height: 48px;
+            background: linear-gradient(135deg, #FFDE4D 0%, #D4AF37 100%);
+            border-radius: 8px;
+            margin-top: -1px;
+            box-shadow: inset 0 2px 3px rgba(255,255,255,0.5), 0 4px 10px rgba(0,0,0,0.3);
             display: flex;
             align-items: center;
             justify-content: center;
         }}
-        .heartbeat {{
-            width: 14px;
-            height: 14px;
-            background: #000;
-            clip-path: polygon(50% 0%, 100% 35%, 80% 100%, 50% 75%, 20% 100%, 0% 35%);
-        }}
-        .robot-legs {{
-            display: flex;
-            gap: 12px;
-            margin-top: -2px;
-        }}
-        .leg {{
-            width: 7px;
-            height: 18px;
-            background: #000;
+        .hd-dial {{
+            width: 24px;
+            height: 8px;
+            background: #1E1E2F;
             border-radius: 4px;
+        }}
+        .hd-legs {{ display: flex; gap: 16px; margin-top: -2px; }}
+        .hd-leg {{
+            width: 10px;
+            height: 22px;
+            background: #33334D;
+            border-radius: 5px;
             transform-origin: top center;
         }}
-        .left-leg {{
-            animation: swingingLeft 0.45s ease-in-out infinite alternate;
-        }}
-        .right-leg {{
-            animation: swingingRight 0.45s ease-in-out infinite alternate;
+        .hd-left {{ animation: hd-walk-L 0.5s ease-in-out infinite alternate; }}
+        .hd-right {{ animation: hd-walk-R 0.5s ease-in-out infinite alternate; }}
+        .hd-shadow {{
+            width: 50px;
+            height: 6px;
+            background: rgba(0,0,0,0.4);
+            border-radius: 50%;
+            margin-top: 4px;
+            filter: blur(1px);
         }}
     </style>
     """
 
 
 SYNC_SUCCESS_CHARACTER_HTML = """
-<div class="character-box">
-    <div class="bubble">Sync completed successfully! Your live funnel is updated. ✨</div>
-    <div class="bot-avatar">
-        <div class="antenna"></div>
-        <div class="head">
-            <div class="eyes">
-                <div class="eye left"></div>
-                <div class="eye right"></div>
-            </div>
-            <div class="mouth"></div>
+<div class="hd-box">
+    <div class="hd-bubble">Sync completed successfully! Your live funnel is updated. ✨</div>
+    <div class="hd-avatar">
+        <div class="hd-antenna-main">
+            <div class="hd-orb"></div>
+            <div class="hd-wire"></div>
         </div>
-        <div class="body-frame"><div class="screen">⚡</div></div>
+        <div class="hd-robot-face">
+            <div class="hd-screen-inner">
+                <div class="hd-eyes-container">
+                    <div class="hd-neon-eye"></div>
+                    <div class="hd-neon-eye"></div>
+                </div>
+                <div class="hd-speaking-mouth"></div>
+            </div>
+        </div>
+        <div class="hd-torso"><div class="hd-core-light"></div></div>
+        <div class="hd-floor-shadow"></div>
     </div>
 </div>
 <style>
-    @keyframes float {
+    @keyframes float-hd {
         0% { transform: translateY(0px); }
-        50% { transform: translateY(-8px); }
+        50% { transform: translateY(-10px); }
         100% { transform: translateY(0px); }
     }
-    @keyframes blink {
-        0%, 90%, 100% { transform: scaleY(1); }
-        95% { transform: scaleY(0.1); }
+    @keyframes eye-blink-hd {
+        0%, 92%, 100% { transform: scaleY(1); }
+        96% { transform: scaleY(0.1); }
     }
-    @keyframes talk {
-        0%, 100% { width: 16px; height: 4px; border-radius: 2px; }
-        50% { width: 14px; height: 10px; border-radius: 50%; }
+    @keyframes hd-baby-talk {
+        0%, 100% { height: 4px; border-radius: 2px; width: 20px; }
+        50% { height: 12px; border-radius: 50%; width: 16px; background: #FF4B4B; }
     }
-    .character-box {
+    .hd-box {
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        font-family: 'Comic Sans MS', 'Chalkboard SE', sans-serif;
-        padding: 10px;
-        animation: float 2.5s ease-in-out infinite;
+        padding: 20px;
+        background: linear-gradient(135deg, #14142B 0%, #080811 100%);
+        border-radius: 24px;
+        border: 1px solid #222244;
+        box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        animation: float-hd 3s ease-in-out infinite;
     }
-    .bubble {
+    .hd-bubble {
         position: relative;
-        background: #FFDE4D;
-        border: 3px solid #000;
-        border-radius: 16px;
-        padding: 12px 18px;
-        font-weight: bold;
-        color: #000;
-        max-width: 280px;
+        background: linear-gradient(135deg, #FFDE4D 0%, #F1C40F 100%);
+        border-radius: 20px;
+        padding: 16px 24px;
+        font-weight: 800;
+        color: #0C0C1E;
+        max-width: 300px;
         text-align: center;
-        box-shadow: 4px 4px 0px #000;
-        margin-bottom: 15px;
-        font-size: 14px;
+        font-family: system-ui, -apple-system, sans-serif;
+        box-shadow: 0 8px 24px rgba(241,196,15,0.3);
+        margin-bottom: 25px;
+        font-size: 15px;
     }
-    .bubble::after {
+    .hd-bubble::after {
         content: '';
         position: absolute;
-        bottom: -12px;
+        bottom: -10px;
         left: 50%;
         transform: translateX(-50%);
-        border-width: 12px 12px 0;
+        border-width: 10px 10px 0;
         border-style: solid;
-        border-color: #FFDE4D transparent;
-        width: 0;
+        border-color: #F1C40F transparent;
     }
-    .bubble::before {
-        content: '';
-        position: absolute;
-        bottom: -17px;
-        left: 50%;
-        transform: translateX(-50%);
-        border-width: 14px 14px 0;
-        border-style: solid;
-        border-color: #000 transparent;
-        width: 0;
-        z-index: -1;
-    }
-    .bot-avatar {
+    .hd-avatar {
         display: flex;
         flex-direction: column;
         align-items: center;
     }
-    .antenna {
-        width: 5px;
-        height: 12px;
-        background: #000;
-        position: relative;
-    }
-    .antenna::before {
-        content: '';
-        position: absolute;
-        top: -6px;
-        left: -4px;
-        width: 13px;
-        height: 13px;
-        background: #FF4C4C;
-        border: 3px solid #000;
-        border-radius: 50%;
-    }
-    .head {
-        width: 75px;
-        height: 55px;
-        background: #4DEEEA;
-        border: 4px solid #000;
-        border-radius: 18px;
+    .hd-antenna-main {
         display: flex;
         flex-direction: column;
         align-items: center;
-        justify-content: center;
-        gap: 6px;
-        box-shadow: 4px 4px 0px #000;
     }
-    .eyes { display: flex; gap: 14px; }
-    .eye {
+    .hd-orb {
         width: 12px;
         height: 12px;
-        background: #000;
+        background: linear-gradient(135deg, #4DEEEA, #20A4A1);
         border-radius: 50%;
-        animation: blink 3.5s infinite;
+        box-shadow: 0 0 15px #4DEEEA;
     }
-    .mouth {
-        width: 16px;
+    .hd-wire { width: 4px; height: 12px; background: #3A3A55; }
+    .hd-robot-face {
+        width: 90px;
+        height: 68px;
+        background: linear-gradient(135deg, #2A2A40 0%, #1A1A2E 100%);
+        border-radius: 22px;
+        padding: 5px;
+        box-shadow: inset 0 2px 4px rgba(255,255,255,0.2), 0 10px 25px rgba(0,0,0,0.4);
+    }
+    .hd-screen-inner {
+        width: 100%;
+        height: 100%;
+        background: #09090F;
+        border-radius: 16px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        position: relative;
+        overflow: hidden;
+    }
+    .hd-screen-inner::before {
+        content: '';
+        position: absolute;
+        top: 0; left: 0; right: 0; height: 50%;
+        background: linear-gradient(to bottom, rgba(255,255,255,0.08), transparent);
+        pointer-events: none;
+    }
+    .hd-eyes-container { display: flex; gap: 20px; }
+    .hd-neon-eye {
+        width: 14px;
+        height: 14px;
+        background: linear-gradient(135deg, #4DEEEA 0%, #00B4B4 100%);
+        border-radius: 50%;
+        box-shadow: 0 0 12px #4DEEEA;
+        animation: eye-blink-hd 4s infinite;
+    }
+    .hd-speaking-mouth {
+        width: 20px;
         height: 4px;
-        background: #000;
+        background: #4DEEEA;
         border-radius: 2px;
-        animation: talk 0.25s ease-in-out infinite alternate;
+        box-shadow: 0 0 6px #4DEEEA;
+        animation: hd-baby-talk 0.22s ease-in-out infinite alternate;
     }
-    .body-frame {
-        width: 50px;
-        height: 35px;
-        background: #EAEAEA;
-        border: 4px solid #000;
-        border-top: none;
-        border-radius: 0 0 12px 12px;
+    .hd-torso {
+        width: 60px;
+        height: 30px;
+        background: linear-gradient(135deg, #FF4B4B 0%, #990000 100%);
+        border-radius: 0 0 16px 16px;
+        margin: -1px auto 0 auto;
         display: flex;
         align-items: center;
         justify-content: center;
-        box-shadow: 4px 4px 0px #000;
+        box-shadow: 0 8px 16px rgba(0,0,0,0.3);
     }
-    .screen { font-size: 14px; }
+    .hd-core-light {
+        width: 12px;
+        height: 12px;
+        background: #FFF;
+        border-radius: 50%;
+        box-shadow: 0 0 10px #FFF;
+    }
+    .hd-floor-shadow {
+        width: 70px;
+        height: 6px;
+        background: rgba(0,0,0,0.6);
+        border-radius: 50%;
+        margin-top: 12px;
+        filter: blur(2px);
+    }
 </style>
 <script>
     setTimeout(function() {
@@ -303,13 +341,17 @@ SYNC_SUCCESS_CHARACTER_HTML = """
             'Sync completed successfully! Your live funnel is updated.'
         );
         phrase.volume = 1.0;
-        phrase.rate = 1.05;
-        phrase.pitch = 1.35;
+        phrase.pitch = 0.52;
+        phrase.rate = 0.92;
         window.speechSynthesis.speak(phrase);
-        setTimeout(function() {
-            var mouth = document.querySelector('.mouth');
-            if (mouth) mouth.style.animation = 'none';
-        }, 3200);
-    }, 300);
+        phrase.onend = function() {
+            var mouth = document.querySelector('.hd-speaking-mouth');
+            if (mouth) {
+                mouth.style.animation = 'none';
+                mouth.style.height = '4px';
+                mouth.style.width = '20px';
+            }
+        };
+    }, 400);
 </script>
 """
