@@ -481,14 +481,29 @@ def normalize_partner_name(partner, email_from=None):
     return "-"
 
 
+def calculate_working_days_exclusive(start_date, end_date):
+    """Business days (Mon–Fri) between dates, minus 1 exclusive day."""
+    if start_date >= end_date:
+        return 0
+
+    current = start_date
+    working_days = 0
+    while current <= end_date:
+        if current.weekday() < 5:
+            working_days += 1
+        current += timedelta(days=1)
+
+    return max(0, working_days - 1)
+
+
 def format_ai_sheet_dates(opp_str, prop_str):
-    """Parse Gemini YYYY-MM-DD dates; return sheet dates (dd-Month-yyyy) and TAT."""
+    """Parse Gemini YYYY-MM-DD dates; return sheet dates (dd-Month-yyyy) and business-day TAT."""
     tat = 0
     now_fmt = datetime.now().strftime(SHEET_DATE_FORMAT)
     try:
         opp_date = datetime.strptime((opp_str or "").strip(), "%Y-%m-%d")
         prop_date = datetime.strptime((prop_str or "").strip(), "%Y-%m-%d")
-        tat = max(0, (prop_date - opp_date).days - 1)
+        tat = calculate_working_days_exclusive(opp_date, prop_date)
         return opp_date.strftime(SHEET_DATE_FORMAT), prop_date.strftime(SHEET_DATE_FORMAT), tat
     except ValueError:
         opp_fmt = format_sheet_date(opp_str) if opp_str else now_fmt
@@ -499,18 +514,19 @@ def format_ai_sheet_dates(opp_str, prop_str):
 def get_ai_extraction(email_body, email_user):
     """Delegates data extraction, smart RFQ-specific dates, and business logic to Gemini."""
     prompt = f"""
-    You are an expert telecom data verification entity. Analyze the email thread and extract quoting matrix rows into clean structured objects.
+    You are an expert telecom data verification engine. Analyze the email thread and extract quoting matrix rows into clean structured objects.
 
     CRITICAL ALIGNMENT & TAXONOMY RULES:
     1. Quote ID: Extract tracking identifier format matching expressions like 'I698-26' or 'F780-23'. Do NOT extract subject titles.
 
-    2. Opportunity Date (SMART RFQ DETECTION):
-       - Do NOT blindly select the absolute oldest timestamp in the thread if the email loop contains long historical discussions, greetings, or older unrelated topics.
-       - Instead, locate the exact email where the partner/customer explicitly submitted this specific RFQ/request for the quoted circuits.
-       - Specifically, pinpoint the customer message immediately preceding our team's pricing/proposal response. This ensures that the Turnaround Time (TAT) strictly tracks our active response window and stays as minimal and accurate as possible.
+    2. Opportunity Date (HYPER-MINIMAL TAT LOGIC):
+       - OBJECTIVE: Calculate the absolute lowest logically defensible Turnaround Time (TAT) for our sales engineering execution.
+       - RULE A (Scope Isolation): Look at the exact circuits listed in the final pricing table. If the email thread began days or weeks earlier discussing a completely different country, city, or independent RFQ scope, you MUST completely ignore those older dates.
+       - RULE B (The Actionable Milestone Pivot): Do NOT default to the initial incoming email if our team was operationally blocked. If our team replied asking for missing prerequisites (like LPOC details, specific customer names, or explicit capacities) to proceed, the clock does NOT start at the beginning. Instead, set the 'Opportunity Date' to the exact date when the requirement became actively scoped, or when the customer provided the final clarity needed to process the engineering feasibility (e.g., if a loop for a new country scope actively formalizes on Friday, May 8, 2026, select 2026-05-08).
+       - RULE C (Eliminate Trailing Idle Days): Ensure no dead time spent waiting on customer definition parameters is unfairly charged against our turnaround performance metric.
        - Format strictly as YYYY-MM-DD.
 
-    3. Proposal Date: Contextually find the date/timestamp when our team ({email_user}) sent the pricing/proposal response. If no pricing has been sent yet, fallback to the opportunity date. Format strictly as YYYY-MM-DD.
+    3. Proposal Date: Contextually find the date/timestamp when our team ({email_user}) sent the final completed pricing/proposal response. If no pricing has been sent yet, fallback to the opportunity date. Format strictly as YYYY-MM-DD.
 
     4. Capacity / Quantity: State the metric unit explicitly (e.g., '50 Mbps', '20 Gbps').
     5. Currency Formatting: Ensure NRC and MRC fields include the '$' symbol and correct commas (e.g., '$1,500.00'). If none, write '-'.
@@ -526,7 +542,6 @@ def get_ai_extraction(email_body, email_user):
        - End Customer: The final client organization the partner is quoting for (e.g., 'Baker Hughes').
     9. Contract Terms Expansion (One Object Per Term):
        - If a single table row lists multiple contract terms (e.g. columns for 12, 24, and 36 months), you MUST output a SEPARATE object for EACH term.
-       - Each separate object maintains duplicate circuit details but lists exactly ONE distinct Contract Term (e.g., '12 Months') and its corresponding unique NRC/MRC values.
 
     EMAIL THREAD FOR PROCESSING:
     {email_body}
