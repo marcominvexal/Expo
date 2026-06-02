@@ -20,8 +20,8 @@ load_dotenv("secrets.env", override=True)
 load_dotenv(override=True)
 
 SCOPE = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis.com/auth/drive"]
-SPREADSHEET_ID = "1jgbUhsKhD2fPH4l4q2kvWCQAfhXYka21KgBnOiTLfkc"
-WORKSHEET_GID = 541908909
+SPREADSHEET_ID = "1E9gYdeZUwMEmnwe164io7E47QuXnBfYcELdulUroN_4"
+WORKSHEET_GID = 0
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit#gid={WORKSHEET_GID}"
 
 
