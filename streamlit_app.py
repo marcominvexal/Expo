@@ -612,6 +612,23 @@ def normalize_offered_us(value):
     return text if text and text != "-" else DEFAULT_OFFERED_US
 
 
+def resolve_technology(service_raw, tech_raw):
+    """Map service/product to the strict Technology taxonomy."""
+    service_norm = str(service_raw or "").strip().upper()
+    tech_norm = str(tech_raw or "-").strip()
+    if service_norm in ("DIA", "BIA"):
+        return "Internet"
+    if service_norm in ("L2VPN", "MPLS") or "EVPL" in service_norm:
+        return "Ethernet"
+    if service_norm in ("IPLC", "IEPL", "EOSDH", "DPLC", "DEPL"):
+        return "TDM"
+    if service_norm == "COLOCATION + PWR":
+        return "Datacenter"
+    if any(h in service_norm for h in ("CROSS CONNECT", "EQUIPMENT", "FIELD SUPPORT")):
+        return "Managed Services / Hardware"
+    return tech_norm if tech_norm else "-"
+
+
 def is_exponentia_name(value):
     if not value:
         return False
@@ -790,7 +807,7 @@ def get_ai_extraction(email_body, email_user):
     5. Currency Formatting: Ensure NRC and MRC fields include the '$' symbol and correct commas (e.g., '$1,500.00'). If none, write '-'.
     6. Strict Tech/Service Taxonomy Mapping:
        - If Service is DIA or BIA -> Technology MUST be 'Internet'
-       - If Service is L2VPN or MPLS -> Technology MUST be 'Ethernet'
+       - If Service is L2VPN, MPLS, or EVPL Linear -> Technology MUST be 'Ethernet'
        - If Service is IPLC, IEPL, EoSDH, DPLC, or DEPL -> Technology MUST be 'TDM'
        - If Service is Colocation + PWR -> Technology MUST be 'Datacenter'
        - If Service is Cross Connects, Equipment, or Field Support -> Technology MUST be 'Managed Services / Hardware'
@@ -801,10 +818,11 @@ def get_ai_extraction(email_body, email_user):
     10. LM Infra Details (column after On-Net/Off-Net): MUST be exactly 'Fiber' or 'Wireless' — the last-mile physical media type. NEVER put terms & conditions, contract text, SLAs, or unrelated notes here.
     11. Last Mile Protection: MUST be exactly one of 'Protected', 'Unprotected', or 'N/A'.
     12. Wet Segment Protection: MUST be exactly one of 'Protected', 'Unprotected', or 'N/A'. This is protection status only — NOT fiber/wireless media.
-    13. XC Included/Excluded: Cross-connect status — exactly one of 'Included', 'Excluded', or 'N/A'.
+    13. XC Included/Excluded: Cross-connect status — exactly one of 'Included', 'Excluded', or 'N/A'. For Internet/DIA/BIA services, this must be set strictly to '-'.
     14. Offered Us: What we offered (e.g., 'New Service', 'Renewal', 'Upgrade'). Default to 'New Service' if unclear.
     15. Partner Name vs End Customer:
        - Partner Name: The external entity emailing Exponentia Global to request a quote (e.g., 'Noor Data Network'). NEVER set this to 'Exponentia Global'.
+    16. Site B & Site B City for Internet: If Technology or Service is Internet/DIA/BIA, set both 'Site B' and 'Site B City' fields strictly to '-'.
 
     EMAIL THREAD FOR PROCESSING:
     {email_body}
@@ -852,6 +870,116 @@ def get_ai_extraction(email_body, email_user):
     anim_placeholder.empty()
     raise TimeoutError(
         "Gemini Engine overloaded. System timed out automatically after retrying for 1 minute."
+    )
+
+
+def reapply_all_rules_and_align_sheet():
+    """
+    Re-parses and cleanses every existing data row on the Google Sheet against
+    all structural framework rules retroactively.
+    """
+    sheet = get_funnel_worksheet()
+    ensure_funnel_sheet_columns(sheet)
+    all_values = sheet.get_all_values()
+    if not all_values or len(all_values) <= 1:
+        return "Sheet contains no data rows to align."
+
+    data_rows = all_values[1:]
+    public_holidays = load_public_holidays()
+    aligned_rows = []
+
+    for idx, row in enumerate(data_rows):
+        while len(row) < FUNNEL_COLUMN_COUNT:
+            row.append("-")
+
+        s_no = idx + 1
+        quote_id = str(row[1]).strip() if row[1] else "-"
+        opp_raw = row[2]
+        partner_raw = row[3]
+        customer_raw = row[4]
+        site_a = str(row[5]).strip() if row[5] else "-"
+        site_a_city = str(row[6]).strip() if row[6] else "-"
+        site_b = str(row[7]).strip() if row[7] else "-"
+        site_b_city = str(row[8]).strip() if row[8] else "-"
+        tech_raw = row[9]
+        service_raw = row[10]
+        capacity = str(row[11]).strip() if row[11] else "-"
+        nrc_raw = row[12]
+        mrc_raw = row[13]
+        comm_mode = str(row[14]).strip() if row[14] else "Email"
+        prop_raw = row[15]
+        term_raw = row[16]
+        sales_effort = str(row[17]).strip() if row[17] else "-"
+        comments = str(row[18]).strip() if row[18] else "-"
+        status = str(row[19]).strip() if row[19] else "OPEN"
+        sub_status = str(row[20]).strip() if row[20] else "MEDIUM"
+        poc = str(row[21]).strip() if row[21] else "-"
+        email_addr = str(row[22]).strip() if row[22] else "-"
+        on_net_raw = row[24]
+        lm_infra_raw = row[25]
+        lm_prot_raw = row[26]
+        wet_prot_raw = row[27]
+        xc_raw = row[28]
+        offered_us_raw = row[30]
+
+        partner_name = normalize_partner_name(partner_raw)
+        end_customer = normalize_end_customer(customer_raw)
+        tech_norm = resolve_technology(service_raw, tech_raw)
+
+        if tech_norm == "Internet":
+            site_b = "-"
+            site_b_city = "-"
+            xc_status = "-"
+        else:
+            xc_status = normalize_xc_status(xc_raw)
+
+        opp_parsed = parse_sheet_date_value(opp_raw)
+        prop_parsed = parse_sheet_date_value(prop_raw)
+
+        if opp_parsed and prop_parsed:
+            tat = calculate_working_days_exclusive(opp_parsed, prop_parsed, public_holidays)
+            holiday_count = count_holidays_in_range(opp_parsed, prop_parsed, public_holidays)
+            opp_formatted = opp_parsed.strftime(SHEET_DATE_FORMAT)
+            prop_formatted = prop_parsed.strftime(SHEET_DATE_FORMAT)
+        else:
+            opp_formatted = format_sheet_date(opp_raw)
+            prop_formatted = format_sheet_date(prop_raw)
+            try:
+                tat = int(float(row[23])) if len(row) > 23 else 0
+            except ValueError:
+                tat = 0
+            try:
+                holiday_count = int(float(row[29])) if len(row) > 29 else 0
+            except ValueError:
+                holiday_count = 0
+
+        contract_term = normalize_contract_term(term_raw)
+        on_net = normalize_on_net_status(on_net_raw)
+        lm_infra = normalize_lm_infra(lm_infra_raw, comments)
+        last_mile_protection = normalize_protection_status(lm_prot_raw, default="Unprotected")
+        wet_segment_protection = normalize_protection_status(wet_prot_raw, default="N/A")
+        offered_us = normalize_offered_us(offered_us_raw)
+
+        aligned_rows.append([
+            s_no, quote_id, opp_formatted, partner_name, end_customer,
+            site_a, site_a_city, site_b, site_b_city, tech_norm, service_raw, capacity,
+            format_currency(nrc_raw), format_currency(mrc_raw), comm_mode, prop_formatted,
+            contract_term, sales_effort, comments, status, sub_status, poc, email_addr,
+            tat, on_net, lm_infra, last_mile_protection, wet_segment_protection, xc_status,
+            holiday_count, offered_us,
+        ])
+
+    body = [FUNNEL_COLUMN_HEADERS] + aligned_rows
+    sheet.clear()
+    sheet.update("A1", body, value_input_option="USER_ENTERED")
+
+    if len(body) > 1:
+        sheet.format(
+            f"M2:N{len(body)}",
+            {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}},
+        )
+    return (
+        f"Success! Reapplied all automation rules across all {len(aligned_rows)} live funnel lines!"
     )
 
 
@@ -904,6 +1032,9 @@ def run_bot():
                     c.get('Proposal Date', ''),
                     public_holidays,
                 )
+
+                service_raw = c.get('Service/Product', '-')
+                tech_norm = resolve_technology(service_raw, c.get('Technology', '-'))
                 lm_infra = normalize_lm_infra(
                     c.get('LM Infra Details'),
                     c.get('Comments'),
@@ -920,7 +1051,18 @@ def run_bot():
                     c.get('Wet Segment Protection'),
                     default='N/A',
                 )
-                xc_status = normalize_xc_status(c.get('XC Included/Excluded'))
+
+                site_a = c.get('Site A', '-')
+                site_a_city = c.get('Site A City', '-')
+                if tech_norm == "Internet":
+                    site_b = "-"
+                    site_b_city = "-"
+                    xc_status = "-"
+                else:
+                    site_b = c.get('Site B', '-')
+                    site_b_city = c.get('Site B City', '-')
+                    xc_status = normalize_xc_status(c.get('XC Included/Excluded'))
+
                 offered_us = normalize_offered_us(c.get('Offered Us'))
 
                 new_rows.append([
@@ -929,12 +1071,12 @@ def run_bot():
                     opp_formatted,                                      # 3. Opportunity date
                     partner_name,                                       # 4. Partner name
                     end_customer,                                       # 5. End customer
-                    c.get('Site A', '-'),                               # 6. Site A
-                    c.get('Site A City', '-'),                          # 7. Site A City
-                    c.get('Site B', '-'),                               # 8. Site B
-                    c.get('Site B City', '-'),                          # 9. Site B city
-                    c.get('Technology', '-'),                           # 10. Technology
-                    c.get('Service/Product', '-'),                      # 11. Service/Products
+                    site_a,                                             # 6. Site A
+                    site_a_city,                                        # 7. Site A City
+                    site_b,                                             # 8. Site B
+                    site_b_city,                                        # 9. Site B city
+                    tech_norm,                                          # 10. Technology
+                    service_raw,                                        # 11. Service/Products
                     c.get('Capacity / Quantity', '-'),                  # 12. Capacity/Quantity
                     format_currency(c.get('NRC')),                      # 13. NRC
                     format_currency(c.get('MRC')),                       # 14. MRC
@@ -963,7 +1105,7 @@ def run_bot():
             first_row = len(existing_data) + 2
             last_row = first_row + len(new_rows) - 1
             sheet.format(
-                f"L{first_row}:M{last_row}",
+                f"M{first_row}:N{last_row}",
                 {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}},
             )
             try:
@@ -1139,15 +1281,15 @@ with hero_right:
 st.markdown(
     """
     <div class="glass-card">
-        <p class="card-label">Automation</p>
-        <p class="card-heading">Process unread quote threads</p>
-        <p class="card-body">Mark a quote email as <strong>Unread</strong> in Gmail, then run sync. The bot extracts circuits, applies your tech/service rules, and appends rows to the live funnel.</p>
+        <p class="card-label">Automation Control</p>
+        <p class="card-heading">Process or Align Live Data Structures</p>
+        <p class="card-body">Mark a quote email as <strong>Unread</strong> in Gmail to parse new threads, or trigger the full framework realignment engine to force structural updates on past sheet history.</p>
     </div>
     """,
     unsafe_allow_html=True,
 )
 
-sync_col, columns_col, format_col, info_col = st.columns([1.2, 1, 1, 1])
+sync_col, columns_col, format_col, info_col = st.columns([1.2, 1, 1.3, 1])
 with sync_col:
     if st.button("Sync Gmail to Google Sheets"):
         with st.spinner("Analyzing emails with Gemini…"):
@@ -1171,24 +1313,23 @@ with columns_col:
             except Exception as exc:
                 st.error(f"Could not update sheet columns: {exc}")
 with format_col:
-    if st.button("Reformat sheet dates"):
-        with st.spinner("Updating existing date cells…"):
-            result = reformat_existing_sheet_dates()
-            if result and "Updated" in result:
+    if st.button("Reapply All Rules & Align Sheet"):
+        with st.spinner("Executing alignment engine across all cell matrices…"):
+            result = reapply_all_rules_and_align_sheet()
+            if result and "Success" in result:
                 st.success(result)
-            elif result and "already" in result:
-                st.info(result)
+                st.toast("Sheet data framework perfectly aligned!", icon="✨")
             else:
-                st.warning(result or "No dates updated.")
+                st.warning(result or "No rows aligned.")
 with info_col:
     st.markdown(
         """
         <div class="glass-card" style="margin-top:0;padding:1.25rem 1.5rem;">
             <p class="card-label">Quick tips</p>
             <p class="card-body" style="margin:0;">
-            • Use a Gmail <strong>App Password</strong><br>
-            • Share the sheet with your service account<br>
-            • Quote IDs like <code>I698-26</code> parse best
+            • EVPL Linear auto-maps to Ethernet<br>
+            • Alignment cleans manual/historical rows<br>
+            • Internet stripping clears Site B metrics
             </p>
         </div>
         """,
