@@ -1,0 +1,4 @@
+{
+  "dates": [],
+  "_comment": "Add public holidays as YYYY-MM-DD strings in dates[]. TAT and the Holidays column use this list."
+}

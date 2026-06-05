@@ -256,6 +256,9 @@ def parse_currency_number(value):
 SHEET_DATE_FORMAT = "%d-%B-%Y"  # e.g. 19-May-2026
 # Column indices (0-based) for Opportunity Date (C) and Proposal Date (P)
 SHEET_DATE_COLUMN_INDICES = (2, 15)
+# 31-column funnel layout (1-based letters for sheet formatting)
+FUNNEL_COL_LM_INFRA = "Z"  # LM Infra details: Fiber or Wireless
+HOLIDAYS_JSON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "holidays.json")
 
 _DATE_PARSE_FORMATS = (
     SHEET_DATE_FORMAT,
@@ -387,6 +390,11 @@ def format_currency(value):
 MEDIA_FIBER = "Fiber"
 MEDIA_WIRELESS = "Wireless"
 ALLOWED_MEDIA = {MEDIA_FIBER, MEDIA_WIRELESS}
+DEFAULT_END_CUSTOMER = "Unknown"
+DEFAULT_ON_NET = "On-Net"
+DEFAULT_OFFERED_US = "New Service"
+PROTECTION_STATUSES = ("Protected", "Unprotected", "N/A")
+XC_STATUSES = ("Included", "Excluded", "N/A")
 
 EXPONENTIA_NAMES = (
     "exponentia global",
@@ -400,12 +408,27 @@ EXPONENTIA_EMAIL_DOMAINS = (
 )
 
 
-def normalize_media(value, lm_infra=None):
-    """Restrict Media column to Fiber or Wireless only."""
-    combined = " ".join(
-        str(part or "")
-        for part in (value, lm_infra)
-    ).lower()
+def load_public_holidays():
+    """Load YYYY-MM-DD public holiday dates from holidays.json (extend when list is provided)."""
+    holidays = set()
+    if not os.path.isfile(HOLIDAYS_JSON_PATH):
+        return holidays
+    try:
+        with open(HOLIDAYS_JSON_PATH, encoding="utf-8") as handle:
+            data = json.load(handle)
+        raw_dates = data.get("dates", data if isinstance(data, list) else [])
+        for item in raw_dates:
+            text = str(item).strip()
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+                holidays.add(text)
+    except (OSError, json.JSONDecodeError, TypeError):
+        pass
+    return holidays
+
+
+def normalize_lm_infra(value, fallback_text=None):
+    """LM Infra details column: Fiber or Wireless only (not terms/conditions)."""
+    combined = " ".join(str(part or "") for part in (value, fallback_text)).lower()
 
     wireless_hints = (
         "wireless", "radio", "microwave", "wifi", "wi-fi", "lte", "5g", "4g",
@@ -414,6 +437,14 @@ def normalize_media(value, lm_infra=None):
     fiber_hints = (
         "fiber", "fibre", "ftth", "fttx", "fttp", "dark fiber", "pon", "gpon",
     )
+    terms_hints = (
+        "terms", "condition", "contract", "liability", "warranty", "sla",
+        "payment", "validity", "quote valid",
+    )
+    if any(h in combined for h in terms_hints) and not any(
+        h in combined for h in wireless_hints + fiber_hints
+    ):
+        return MEDIA_FIBER
 
     if any(h in combined for h in wireless_hints):
         return MEDIA_WIRELESS
@@ -429,6 +460,74 @@ def normalize_media(value, lm_infra=None):
         return MEDIA_WIRELESS
 
     return MEDIA_FIBER
+
+
+def normalize_end_customer(value):
+    text = (value or "").strip()
+    if not text or text == "-":
+        return DEFAULT_END_CUSTOMER
+    return text
+
+
+def normalize_on_net_status(value):
+    text = (value or "").strip()
+    if not text or text == "-":
+        return DEFAULT_ON_NET
+    compact = re.sub(r"[^a-z0-9]", "", text.lower())
+    if "offnet" in compact or compact == "off":
+        return "Off-Net"
+    if "onnet" in compact or compact == "on":
+        return DEFAULT_ON_NET
+    return text
+
+
+def normalize_contract_term(value):
+    """Contract term is always expressed in months (e.g. '12 Months')."""
+    text = (value or "").strip()
+    if not text or text == "-":
+        return "-"
+    if re.search(r"month", text, re.IGNORECASE):
+        match = re.search(r"(\d+)", text)
+        if match:
+            return f"{match.group(1)} Months"
+        return text
+    match = re.search(r"(\d+)", text)
+    if match:
+        return f"{match.group(1)} Months"
+    return f"{text} Months"
+
+
+def normalize_protection_status(value, default="N/A"):
+    text = str(value or "").strip()
+    if not text or text == "-":
+        return default
+    lower = text.lower()
+    if lower in ("n/a", "na", "not applicable"):
+        return "N/A"
+    if "unprotect" in lower or lower in ("no", "n", "unprotected"):
+        return "Unprotected"
+    if "protect" in lower or lower in ("yes", "y", "protected"):
+        return "Protected"
+    return default
+
+
+def normalize_xc_status(value, default="N/A"):
+    text = str(value or "").strip()
+    if not text or text == "-":
+        return default
+    lower = text.lower()
+    if lower in ("n/a", "na", "not applicable"):
+        return "N/A"
+    if "exclud" in lower:
+        return "Excluded"
+    if "includ" in lower:
+        return "Included"
+    return default
+
+
+def normalize_offered_us(value):
+    text = (value or "").strip()
+    return text if text and text != "-" else DEFAULT_OFFERED_US
 
 
 def is_exponentia_name(value):
@@ -485,34 +584,56 @@ def normalize_partner_name(partner, email_from=None):
     return "-"
 
 
-def calculate_working_days_exclusive(start_date, end_date):
-    """Business days (Mon–Fri) between dates, minus 1 exclusive day."""
+def count_holidays_in_range(start_date, end_date, holidays):
+    """Count public holidays that fall within [start_date, end_date] (inclusive)."""
+    if not holidays:
+        return 0
+    current = start_date
+    count = 0
+    while current <= end_date:
+        if current.strftime("%Y-%m-%d") in holidays:
+            count += 1
+        current += timedelta(days=1)
+    return count
+
+
+def calculate_working_days_exclusive(start_date, end_date, holidays=None):
+    """Business days (Mon–Fri) between dates, excluding public holidays, minus 1 exclusive day."""
     if start_date >= end_date:
         return 0
 
+    holiday_set = holidays if holidays is not None else load_public_holidays()
     current = start_date
     working_days = 0
     while current <= end_date:
-        if current.weekday() < 5:
+        if current.weekday() < 5 and current.strftime("%Y-%m-%d") not in holiday_set:
             working_days += 1
         current += timedelta(days=1)
 
     return max(0, working_days - 1)
 
 
-def format_ai_sheet_dates(opp_str, prop_str):
-    """Parse Gemini YYYY-MM-DD dates; return sheet dates (dd-Month-yyyy) and business-day TAT."""
+def format_ai_sheet_dates(opp_str, prop_str, holidays=None):
+    """Parse Gemini YYYY-MM-DD dates; return sheet dates, holiday-aware TAT, and holiday count."""
     tat = 0
+    holiday_count = 0
     now_fmt = datetime.now().strftime(SHEET_DATE_FORMAT)
+    holiday_set = holidays if holidays is not None else load_public_holidays()
     try:
         opp_date = datetime.strptime((opp_str or "").strip(), "%Y-%m-%d")
         prop_date = datetime.strptime((prop_str or "").strip(), "%Y-%m-%d")
-        tat = calculate_working_days_exclusive(opp_date, prop_date)
-        return opp_date.strftime(SHEET_DATE_FORMAT), prop_date.strftime(SHEET_DATE_FORMAT), tat
+        tat = calculate_working_days_exclusive(opp_date, prop_date, holiday_set)
+        holiday_count = count_holidays_in_range(opp_date, prop_date, holiday_set)
+        return (
+            opp_date.strftime(SHEET_DATE_FORMAT),
+            prop_date.strftime(SHEET_DATE_FORMAT),
+            tat,
+            holiday_count,
+        )
     except ValueError:
         opp_fmt = format_sheet_date(opp_str) if opp_str else now_fmt
         prop_fmt = format_sheet_date(prop_str) if prop_str else now_fmt
-        return opp_fmt, prop_fmt, tat
+        return opp_fmt, prop_fmt, tat, holiday_count
 
 
 GEMINI_CIRCUITS_SCHEMA = {
@@ -544,11 +665,15 @@ GEMINI_CIRCUITS_SCHEMA = {
                     'Contact Email Address': {'type': 'STRING'},
                     'On-Net/Off-Net': {'type': 'STRING'},
                     'LM Infra Details': {'type': 'STRING'},
-                    'Media': {'type': 'STRING'},
+                    'Last Mile Protection': {'type': 'STRING'},
+                    'Wet Segment Protection': {'type': 'STRING'},
+                    'XC Included/Excluded': {'type': 'STRING'},
+                    'Offered Us': {'type': 'STRING'},
                 },
                 'required': [
                     'Quote ID', 'Opportunity Date', 'Proposal Date', 'Partner Name',
-                    'Technology', 'Service/Product', 'Capacity / Quantity', 'NRC', 'MRC', 'Media',
+                    'Technology', 'Service/Product', 'Capacity / Quantity', 'NRC', 'MRC',
+                    'LM Infra Details',
                 ],
             },
         },
@@ -587,12 +712,17 @@ def get_ai_extraction(email_body, email_user):
        - If Service is IPLC, IEPL, EoSDH, DPLC, or DEPL -> Technology MUST be 'TDM'
        - If Service is Colocation + PWR -> Technology MUST be 'Datacenter'
        - If Service is Cross Connects, Equipment, or Field Support -> Technology MUST be 'Managed Services / Hardware'
-    7. Media: MUST be exactly 'Fiber' or 'Wireless' only. Detect contextually from text or LM details.
-    8. Partner Name vs End Customer:
+    7. End Customer: The final client organization the partner is quoting for (e.g., 'Baker Hughes'). If not mentioned anywhere, use 'Unknown'.
+    8. On-Net/Off-Net: If the email does not explicitly state off-net, use 'On-Net'.
+    9. Contract Terms: ALWAYS express duration in months with the word 'Months' (e.g., '12 Months', '24 Months', '36 Months'). Never use years-only labels.
+       - If a single table row lists multiple contract terms (e.g. columns for 12, 24, and 36 months), output a SEPARATE object for EACH term.
+    10. LM Infra Details (column after On-Net/Off-Net): MUST be exactly 'Fiber' or 'Wireless' — the last-mile physical media type. NEVER put terms & conditions, contract text, SLAs, or unrelated notes here.
+    11. Last Mile Protection: MUST be exactly one of 'Protected', 'Unprotected', or 'N/A'.
+    12. Wet Segment Protection: MUST be exactly one of 'Protected', 'Unprotected', or 'N/A'. This is protection status only — NOT fiber/wireless media.
+    13. XC Included/Excluded: Cross-connect status — exactly one of 'Included', 'Excluded', or 'N/A'.
+    14. Offered Us: What we offered (e.g., 'New Service', 'Renewal', 'Upgrade'). Default to 'New Service' if unclear.
+    15. Partner Name vs End Customer:
        - Partner Name: The external entity emailing Exponentia Global to request a quote (e.g., 'Noor Data Network'). NEVER set this to 'Exponentia Global'.
-       - End Customer: The final client organization the partner is quoting for (e.g., 'Baker Hughes').
-    9. Contract Terms Expansion (One Object Per Term):
-       - If a single table row lists multiple contract terms (e.g. columns for 12, 24, and 36 months), you MUST output a SEPARATE object for EACH term.
 
     EMAIL THREAD FOR PROCESSING:
     {email_body}
@@ -665,6 +795,7 @@ def run_bot():
             return "No new (unread) emails found. Mark a quote email as 'Unread' to test."
 
         new_rows = []
+        public_holidays = load_public_holidays()
 
         for num in email_ids:
             _, data = mail.fetch(num, '(RFC822)')
@@ -685,24 +816,62 @@ def run_bot():
                 circuits = [circuits]
 
             for c in circuits:
-                opp_formatted, prop_formatted, tat = format_ai_sheet_dates(
+                opp_formatted, prop_formatted, tat, holiday_count = format_ai_sheet_dates(
                     c.get('Opportunity Date', ''),
                     c.get('Proposal Date', ''),
+                    public_holidays,
                 )
-                lm_infra = c.get('LM Infra Details', '-') or '-'
-                media = normalize_media(c.get('Media'), lm_infra)
+                lm_infra = normalize_lm_infra(
+                    c.get('LM Infra Details'),
+                    c.get('Comments'),
+                )
                 partner_name = normalize_partner_name(c.get('Partner Name'), email_from)
+                end_customer = normalize_end_customer(c.get('End Customer'))
+                on_net = normalize_on_net_status(c.get('On-Net/Off-Net'))
+                contract_term = normalize_contract_term(c.get('Contract Terms'))
+                last_mile_protection = normalize_protection_status(
+                    c.get('Last Mile Protection'),
+                    default='Unprotected',
+                )
+                wet_segment_protection = normalize_protection_status(
+                    c.get('Wet Segment Protection'),
+                    default='N/A',
+                )
+                xc_status = normalize_xc_status(c.get('XC Included/Excluded'))
+                offered_us = normalize_offered_us(c.get('Offered Us'))
 
                 new_rows.append([
-                    last_s_no, c.get('Quote ID', '-'), opp_formatted,
-                    partner_name, c.get('End Customer', '-'), c.get('Site A', '-'),
-                    c.get('Site A City', '-'), c.get('Site B', '-'), c.get('Site B City', '-'),
-                    c.get('Technology', '-'), c.get('Service/Product', '-'), c.get('Capacity / Quantity', '-'),
-                    format_currency(c.get('NRC')), format_currency(c.get('MRC')), 'Email', prop_formatted,
-                    c.get('Contract Terms', '-'), c.get('Sales Effort By', '-'), c.get('Comments', '-'),
-                    'OPEN', 'MEDIUM', c.get('POC', '-'), c.get('Contact Email Address', '-'),
-                    tat, c.get('On-Net/Off-Net', '-'), lm_infra,
-                    'Unprotected', media, '-', 'New Service',
+                    last_s_no,                                          # 1. S.NO
+                    c.get('Quote ID', '-'),                             # 2. Quote ID
+                    opp_formatted,                                      # 3. Opportunity date
+                    partner_name,                                       # 4. Partner name
+                    end_customer,                                       # 5. End customer
+                    c.get('Site A', '-'),                               # 6. Site A
+                    c.get('Site A City', '-'),                          # 7. Site A City
+                    c.get('Site B', '-'),                               # 8. Site B
+                    c.get('Site B City', '-'),                          # 9. Site B city
+                    c.get('Technology', '-'),                           # 10. Technology
+                    c.get('Service/Product', '-'),                      # 11. Service/Products
+                    c.get('Capacity / Quantity', '-'),                  # 12. Capacity/Quantity
+                    format_currency(c.get('NRC')),                      # 13. NRC
+                    format_currency(c.get('MRC')),                       # 14. MRC
+                    'Email',                                            # 15. Mode of Communication
+                    prop_formatted,                                     # 16. Proposal Date
+                    contract_term,                                      # 17. Contract Term (Months)
+                    c.get('Sales Effort By', '-'),                      # 18. Sales Effort by
+                    c.get('Comments', '-'),                             # 19. Comments
+                    'OPEN',                                             # 20. Status
+                    'MEDIUM',                                           # 21. Sub-status
+                    c.get('POC', '-'),                                  # 22. POC
+                    c.get('Contact Email Address', '-'),                # 23. Contact Email Address
+                    tat,                                                # 24. TAT
+                    on_net,                                             # 25. On-Net/Off-Net
+                    lm_infra,                                           # 26. LM Infra details (Fiber/Wireless)
+                    last_mile_protection,                               # 27. Last mile protection
+                    wet_segment_protection,                             # 28. Wet Segment protection status
+                    xc_status,                                          # 29. XC included/excluded
+                    holiday_count,                                      # 30. Holidays
+                    offered_us,                                         # 31. Offered us
                 ])
                 last_s_no += 1
 
@@ -717,7 +886,7 @@ def run_bot():
             try:
                 from gspread.utils import ValidationConditionType
                 sheet.add_validation(
-                    f"AB{first_row}:AB{last_row}",
+                    f"{FUNNEL_COL_LM_INFRA}{first_row}:{FUNNEL_COL_LM_INFRA}{last_row}",
                     ValidationConditionType.one_of_list,
                     [MEDIA_FIBER, MEDIA_WIRELESS],
                     strict=True,
