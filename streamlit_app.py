@@ -259,6 +259,40 @@ SHEET_DATE_COLUMN_INDICES = (2, 15)
 # 31-column funnel layout (1-based letters for sheet formatting)
 FUNNEL_COL_LM_INFRA = "Z"  # LM Infra details: Fiber or Wireless
 HOLIDAYS_JSON_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "holidays.json")
+FUNNEL_COLUMN_HEADERS = [
+    "S.NO",
+    "Quote ID",
+    "Opportunity date",
+    "Partner name",
+    "End customer",
+    "Site A",
+    "Site A City",
+    "Site B",
+    "Site B city",
+    "Technology",
+    "Service/Products",
+    "Capacity/Quantity",
+    "NRC",
+    "MRC",
+    "Mode of Communication",
+    "Proposal Date",
+    "Contract Term",
+    "Sales Effort by",
+    "Comments",
+    "Status",
+    "Sub-status",
+    "POC",
+    "Contact Email Address",
+    "TAT",
+    "On-Net/ Off-Net",
+    "LM Infra details",
+    "Last mile protection",
+    "Wet Segment protection status",
+    "XC included/excluded",
+    "Holidays",
+    "Offered us",
+]
+FUNNEL_COLUMN_COUNT = len(FUNNEL_COLUMN_HEADERS)
 
 _DATE_PARSE_FORMATS = (
     SHEET_DATE_FORMAT,
@@ -329,6 +363,54 @@ def format_sheet_date(value):
 def get_funnel_worksheet():
     spreadsheet = get_gspread_client().open_by_key(SPREADSHEET_ID)
     return spreadsheet.get_worksheet_by_id(WORKSHEET_GID)
+
+
+def _normalize_sheet_header(text):
+    """Normalize header text for comparison (case/spacing/punctuation)."""
+    normalized = re.sub(r"\s+", " ", str(text or "").strip().lower())
+    return normalized.replace(" / ", "/").replace("/ ", "/").replace(" /", "/")
+
+
+def ensure_funnel_sheet_columns(sheet):
+    """
+    Ensure row 1 has all 31 funnel columns in the correct order.
+    Resizes the worksheet and creates/updates headers when missing or wrong.
+    Returns (changed: bool, message: str).
+    """
+    required = FUNNEL_COLUMN_HEADERS
+    required_count = FUNNEL_COLUMN_COUNT
+
+    try:
+        if sheet.col_count < required_count:
+            sheet.resize(cols=required_count)
+    except Exception:
+        pass
+
+    all_values = sheet.get_all_values()
+    current_headers = all_values[0] if all_values else []
+    current_normalized = [
+        _normalize_sheet_header(header)
+        for header in current_headers[:required_count]
+    ]
+    required_normalized = [_normalize_sheet_header(header) for header in required]
+
+    headers_match = (
+        len(current_headers) >= required_count
+        and current_normalized == required_normalized
+    )
+
+    if headers_match:
+        return False, "Funnel column headers already match the 31-column layout."
+
+    last_col = col_index_to_letter(required_count - 1)
+    sheet.update(
+        f"A1:{last_col}1",
+        [required],
+        value_input_option="USER_ENTERED",
+    )
+    if not all_values:
+        return True, f"Created {required_count} funnel column headers on an empty sheet."
+    return True, f"Updated row 1 to the {required_count}-column funnel layout."
 
 
 def reformat_existing_sheet_dates():
@@ -777,6 +859,7 @@ def run_bot():
     mail = None
     try:
         sheet = get_funnel_worksheet()
+        ensure_funnel_sheet_columns(sheet)
         existing_data = sheet.get_all_records()
         last_s_no = len(existing_data) + 1
 
@@ -1064,7 +1147,7 @@ st.markdown(
     unsafe_allow_html=True,
 )
 
-sync_col, format_col, info_col = st.columns([1.2, 1, 1])
+sync_col, columns_col, format_col, info_col = st.columns([1.2, 1, 1, 1])
 with sync_col:
     if st.button("Sync Gmail to Google Sheets"):
         with st.spinner("Analyzing emails with Gemini…"):
@@ -1075,6 +1158,18 @@ with sync_col:
                 components.html(SYNC_SUCCESS_CHARACTER_HTML, height=270)
             else:
                 st.error(result or "Unknown error.")
+with columns_col:
+    if st.button("Setup sheet columns"):
+        with st.spinner("Checking funnel column headers…"):
+            try:
+                sheet = get_funnel_worksheet()
+                changed, result = ensure_funnel_sheet_columns(sheet)
+                if changed:
+                    st.success(result)
+                else:
+                    st.info(result)
+            except Exception as exc:
+                st.error(f"Could not update sheet columns: {exc}")
 with format_col:
     if st.button("Reformat sheet dates"):
         with st.spinner("Updating existing date cells…"):
