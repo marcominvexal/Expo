@@ -873,10 +873,32 @@ def get_ai_extraction(email_body, email_user):
     )
 
 
+def quote_id_sort_key(quote_id):
+    """
+    Natural sort key for quote IDs like 'I698-26' or 'F780-23'
+    (letter prefix + number + dash + 2-digit year).
+
+    Sorts ascending by year, then prefix letter, then numeric part —
+    so matching/related quote IDs bunch together correctly. A plain
+    string sort would wrongly place 'I70-26' after 'I698-26'; this key
+    compares the numeric part as a number so 'I70-26' < 'I698-26'.
+
+    IDs that don't match the expected pattern sort to the end,
+    ordered alphabetically among themselves.
+    """
+    text = str(quote_id).strip().upper()
+    match = re.match(r"^([A-Z]+)\s*0*([0-9]+)\s*-\s*0*([0-9]+)$", text)
+    if match:
+        prefix, number, year = match.groups()
+        return (0, int(year), prefix, int(number), text)
+    return (1, 0, "", 0, text)
+
+
 def reapply_all_rules_and_align_sheet():
     """
     Re-parses and cleanses every existing data row on the Google Sheet against
-    all structural framework rules retroactively.
+    all structural framework rules retroactively, then sorts every row by
+    Quote ID in ascending order and renumbers S.NO to match the sorted order.
     """
     sheet = get_funnel_worksheet()
     ensure_funnel_sheet_columns(sheet)
@@ -888,11 +910,10 @@ def reapply_all_rules_and_align_sheet():
     public_holidays = load_public_holidays()
     aligned_rows = []
 
-    for idx, row in enumerate(data_rows):
+    for row in data_rows:
         while len(row) < FUNNEL_COLUMN_COUNT:
             row.append("-")
 
-        s_no = idx + 1
         quote_id = str(row[1]).strip() if row[1] else "-"
         opp_raw = row[2]
         partner_raw = row[3]
@@ -961,13 +982,17 @@ def reapply_all_rules_and_align_sheet():
         offered_us = normalize_offered_us(offered_us_raw)
 
         aligned_rows.append([
-            s_no, quote_id, opp_formatted, partner_name, end_customer,
+            None, quote_id, opp_formatted, partner_name, end_customer,
             site_a, site_a_city, site_b, site_b_city, tech_norm, service_raw, capacity,
             format_currency(nrc_raw), format_currency(mrc_raw), comm_mode, prop_formatted,
             contract_term, sales_effort, comments, status, sub_status, poc, email_addr,
             tat, on_net, lm_infra, last_mile_protection, wet_segment_protection, xc_status,
             holiday_count, offered_us,
         ])
+
+    aligned_rows.sort(key=lambda r: quote_id_sort_key(r[1]))
+    for position, row in enumerate(aligned_rows, start=1):
+        row[0] = position
 
     body = [FUNNEL_COLUMN_HEADERS] + aligned_rows
     sheet.clear()
@@ -979,7 +1004,8 @@ def reapply_all_rules_and_align_sheet():
             {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}},
         )
     return (
-        f"Success! Reapplied all automation rules across all {len(aligned_rows)} live funnel lines!"
+        f"Success! Reapplied all automation rules and bunched Quote IDs in ascending order "
+        f"across all {len(aligned_rows)} live funnel lines!"
     )
 
 
