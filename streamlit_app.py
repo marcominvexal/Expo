@@ -683,21 +683,54 @@ def normalize_partner_name(partner, email_from=None):
     return "-"
 
 
+def load_public_holidays():
+    """Load YYYY-MM-DD Pakistan public holiday dates from holidays.json."""
+    holidays = set()
+    if not os.path.isfile(HOLIDAYS_JSON_PATH):
+        return holidays
+    try:
+        with open(HOLIDAYS_JSON_PATH, encoding="utf-8") as handle:
+            data = json.load(handle)
+        raw_dates = data.get("dates", [])
+        for item in raw_dates:
+            text = str(item).strip()
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+                holidays.add(text)
+        for entry in data.get("holidays", []):
+            if isinstance(entry, dict):
+                text = str(entry.get("date", "")).strip()
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", text):
+                    holidays.add(text)
+    except (OSError, json.JSONDecodeError, TypeError):
+        pass
+    return holidays
+
+
 def count_holidays_in_range(start_date, end_date, holidays):
-    """Count public holidays that fall within [start_date, end_date] (inclusive)."""
+    """
+    Count Pakistan public holidays on weekdays within [start_date, end_date].
+
+    Only Mon-Fri holiday dates are counted — days removed from TAT beyond weekend exclusion.
+    """
     if not holidays:
         return 0
     current = start_date
     count = 0
     while current <= end_date:
-        if current.strftime("%Y-%m-%d") in holidays:
+        date_key = current.strftime("%Y-%m-%d")
+        if date_key in holidays and current.weekday() < 5:
             count += 1
         current += timedelta(days=1)
     return count
 
 
 def calculate_working_days_exclusive(start_date, end_date, holidays=None):
-    """Business days (Mon–Fri) between dates, excluding public holidays, minus 1 exclusive day."""
+    """
+    TAT = business days between Opportunity and Proposal dates (inclusive span),
+    excluding Saturdays, Sundays, and Pakistan public holidays, minus 1 exclusive day.
+
+    Public holidays on weekdays are not counted toward TAT.
+    """
     if start_date >= end_date:
         return 0
 
@@ -705,24 +738,48 @@ def calculate_working_days_exclusive(start_date, end_date, holidays=None):
     current = start_date
     working_days = 0
     while current <= end_date:
-        if current.weekday() < 5 and current.strftime("%Y-%m-%d") not in holiday_set:
+        date_key = current.strftime("%Y-%m-%d")
+        if current.weekday() < 5 and date_key not in holiday_set:
             working_days += 1
         current += timedelta(days=1)
 
     return max(0, working_days - 1)
 
 
+def compute_tat_from_dates(start_date, end_date, holidays=None):
+    """Single source of truth for TAT and Holidays column from parsed datetimes."""
+    holiday_set = holidays if holidays is not None else load_public_holidays()
+    tat = calculate_working_days_exclusive(start_date, end_date, holiday_set)
+    holiday_count = count_holidays_in_range(start_date, end_date, holiday_set)
+    return tat, holiday_count
+
+
+def compute_tat_from_date_strings(opp_raw, prop_raw, holidays=None):
+    """
+    Parse sheet/Gemini date strings and return formatted dates, TAT, holiday count.
+    Returns (opp_fmt, prop_fmt, tat, holiday_count) or (None, None, 0, 0) if unparseable.
+    """
+    opp_parsed = parse_sheet_date_value(opp_raw)
+    prop_parsed = parse_sheet_date_value(prop_raw)
+    if not opp_parsed or not prop_parsed:
+        return None, None, 0, 0
+    tat, holiday_count = compute_tat_from_dates(opp_parsed, prop_parsed, holidays)
+    return (
+        opp_parsed.strftime(SHEET_DATE_FORMAT),
+        prop_parsed.strftime(SHEET_DATE_FORMAT),
+        tat,
+        holiday_count,
+    )
+
+
 def format_ai_sheet_dates(opp_str, prop_str, holidays=None):
     """Parse Gemini YYYY-MM-DD dates; return sheet dates, holiday-aware TAT, and holiday count."""
-    tat = 0
-    holiday_count = 0
-    now_fmt = datetime.now().strftime(SHEET_DATE_FORMAT)
     holiday_set = holidays if holidays is not None else load_public_holidays()
+    now_fmt = datetime.now().strftime(SHEET_DATE_FORMAT)
     try:
         opp_date = datetime.strptime((opp_str or "").strip(), "%Y-%m-%d")
         prop_date = datetime.strptime((prop_str or "").strip(), "%Y-%m-%d")
-        tat = calculate_working_days_exclusive(opp_date, prop_date, holiday_set)
-        holiday_count = count_holidays_in_range(opp_date, prop_date, holiday_set)
+        tat, holiday_count = compute_tat_from_dates(opp_date, prop_date, holiday_set)
         return (
             opp_date.strftime(SHEET_DATE_FORMAT),
             prop_date.strftime(SHEET_DATE_FORMAT),
@@ -730,9 +787,17 @@ def format_ai_sheet_dates(opp_str, prop_str, holidays=None):
             holiday_count,
         )
     except ValueError:
-        opp_fmt = format_sheet_date(opp_str) if opp_str else now_fmt
-        prop_fmt = format_sheet_date(prop_str) if prop_str else now_fmt
-        return opp_fmt, prop_fmt, tat, holiday_count
+        opp_fmt, prop_fmt, tat, holiday_count = compute_tat_from_date_strings(
+            opp_str, prop_str, holiday_set
+        )
+        if opp_fmt is not None:
+            return opp_fmt, prop_fmt, tat, holiday_count
+        return (
+            format_sheet_date(opp_str) if opp_str else now_fmt,
+            format_sheet_date(prop_str) if prop_str else now_fmt,
+            0,
+            0,
+        )
 
 
 GEMINI_CIRCUITS_SCHEMA = {
@@ -954,25 +1019,14 @@ def reapply_all_rules_and_align_sheet():
         else:
             xc_status = normalize_xc_status(xc_raw)
 
-        opp_parsed = parse_sheet_date_value(opp_raw)
-        prop_parsed = parse_sheet_date_value(prop_raw)
-
-        if opp_parsed and prop_parsed:
-            tat = calculate_working_days_exclusive(opp_parsed, prop_parsed, public_holidays)
-            holiday_count = count_holidays_in_range(opp_parsed, prop_parsed, public_holidays)
-            opp_formatted = opp_parsed.strftime(SHEET_DATE_FORMAT)
-            prop_formatted = prop_parsed.strftime(SHEET_DATE_FORMAT)
-        else:
+        opp_formatted, prop_formatted, tat, holiday_count = compute_tat_from_date_strings(
+            opp_raw, prop_raw, public_holidays
+        )
+        if opp_formatted is None:
             opp_formatted = format_sheet_date(opp_raw)
             prop_formatted = format_sheet_date(prop_raw)
-            try:
-                tat = int(float(row[23])) if len(row) > 23 else 0
-            except ValueError:
-                tat = 0
-            try:
-                holiday_count = int(float(row[29])) if len(row) > 29 else 0
-            except ValueError:
-                holiday_count = 0
+            tat = 0
+            holiday_count = 0
 
         contract_term = normalize_contract_term(term_raw)
         on_net = normalize_on_net_status(on_net_raw)
@@ -1004,8 +1058,8 @@ def reapply_all_rules_and_align_sheet():
             {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}},
         )
     return (
-        f"Success! Reapplied all automation rules and bunched Quote IDs in ascending order "
-        f"across all {len(aligned_rows)} live funnel lines!"
+        f"Success! Reapplied all automation rules (Pakistan holiday-aware TAT) and bunched "
+        f"Quote IDs in ascending order across all {len(aligned_rows)} live funnel lines!"
     )
 
 
@@ -1354,8 +1408,8 @@ with info_col:
             <p class="card-label">Quick tips</p>
             <p class="card-body" style="margin:0;">
             • EVPL Linear auto-maps to Ethernet<br>
-            • Alignment cleans manual/historical rows<br>
-            • Internet stripping clears Site B metrics
+            • TAT excludes weekends + Pakistan holidays<br>
+            • Run Align Sheet to fix historical TAT
             </p>
         </div>
         """,
