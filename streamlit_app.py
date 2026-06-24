@@ -1229,7 +1229,7 @@ STREAMLIT_DEPLOY_URL = (
 
 st.set_page_config(
     page_title="Exponentia Sales Bot",
-    page_icon="📞",
+    page_icon="🎀",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -1272,7 +1272,7 @@ def inject_custom_css():
                 doc.body.prepend(particles);
             }}
             if (particles.childElementCount === 0) {{
-                const colors = ["#67e8f9", "#38bdf8", "#60a5fa", "#3b82f6", "#22d3ee"];
+                const colors = ["#f9a8d4", "#f472b6", "#e879f9", "#c084fc", "#fda4af", "#fbcfe8"];
                 for (let i = 0; i < 50; i++) {{
                     const p = doc.createElement("span");
                     p.className = "particle";

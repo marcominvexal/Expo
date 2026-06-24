@@ -1,17 +1,18 @@
-"""HTML/CSS for Gemini retry wait screen and sync success character."""
+"""HTML/CSS for Gemini retry wait screen and sync success character — girly pink theme."""
 
 
 def gemini_retry_wait_html(remaining_seconds, total_timeout_left):
     return f"""
     <div class="hd-wait-container">
         <div class="hd-status">
-            <span class="pulse-dot"></span>
-            <strong>Gemini is experiencing heavy load.</strong>
+            <span class="pulse-dot">💗</span>
+            <strong>Gemini needs a tiny breather, babe.</strong>
             Retrying in <span>{remaining_seconds}s</span>
-            ({total_timeout_left}s total backup time left)
+            ({total_timeout_left}s sparkle-time left)
         </div>
         <div class="hd-stage">
             <div class="hd-walker">
+                <div class="hd-bow">🎀</div>
                 <div class="hd-antenna">
                     <div class="hd-bulb"></div>
                     <div class="hd-stem"></div>
@@ -22,7 +23,7 @@ def gemini_retry_wait_html(remaining_seconds, total_timeout_left):
                         <div class="hd-eye-glow"></div>
                     </div>
                 </div>
-                <div class="hd-body"><div class="hd-dial"></div></div>
+                <div class="hd-body"><div class="hd-dial">♡</div></div>
                 <div class="hd-legs">
                     <div class="hd-leg hd-left"></div>
                     <div class="hd-leg hd-right"></div>
@@ -34,29 +35,33 @@ def gemini_retry_wait_html(remaining_seconds, total_timeout_left):
     <style>
         @keyframes hd-bounce {{
             0% {{ transform: translateY(0px) scale(1); }}
-            50% {{ transform: translateY(-12px) scale(0.98); }}
+            50% {{ transform: translateY(-14px) scale(1.02); }}
             100% {{ transform: translateY(0px) scale(1); }}
         }}
         @keyframes hd-walk-L {{
-            0% {{ transform: rotate(-30deg); }}
-            100% {{ transform: rotate(30deg); }}
+            0% {{ transform: rotate(-32deg); }}
+            100% {{ transform: rotate(32deg); }}
         }}
         @keyframes hd-walk-R {{
-            0% {{ transform: rotate(30deg); }}
-            100% {{ transform: rotate(-30deg); }}
+            0% {{ transform: rotate(32deg); }}
+            100% {{ transform: rotate(-32deg); }}
         }}
         @keyframes eye-shimmer {{
-            0%, 100% {{ opacity: 0.7; box-shadow: 0 0 8px #FF4B4B; }}
-            50% {{ opacity: 1; box-shadow: 0 0 16px #FF4B4B; }}
+            0%, 100% {{ opacity: 0.75; box-shadow: 0 0 10px #f472b6; }}
+            50% {{ opacity: 1; box-shadow: 0 0 18px #e879f9; }}
+        }}
+        @keyframes bow-wiggle {{
+            0%, 100% {{ transform: rotate(-8deg); }}
+            50% {{ transform: rotate(8deg); }}
         }}
         .hd-wait-container {{
-            background: linear-gradient(135deg, #1E1E2F 0%, #11111D 100%);
-            border: 2px solid #2A2A40;
-            border-radius: 20px;
+            background: linear-gradient(135deg, #fff0f6 0%, #fce7f3 50%, #fae8ff 100%);
+            border: 2px solid #f9a8d4;
+            border-radius: 24px;
             padding: 24px;
-            box-shadow: 0 12px 40px rgba(0,0,0,0.3);
-            font-family: system-ui, -apple-system, sans-serif;
-            color: #E2E8F0;
+            box-shadow: 0 12px 40px rgba(236, 72, 153, 0.25);
+            font-family: 'Quicksand', system-ui, sans-serif;
+            color: #9d174d;
         }}
         .hd-status {{
             display: flex;
@@ -64,22 +69,19 @@ def gemini_retry_wait_html(remaining_seconds, total_timeout_left):
             justify-content: center;
             gap: 10px;
             font-size: 14px;
-            letter-spacing: 0.5px;
+            letter-spacing: 0.3px;
             text-align: center;
             flex-wrap: wrap;
+            font-weight: 600;
         }}
-        .hd-status span {{ color: #4DEEEA; font-weight: 700; }}
+        .hd-status span {{ color: #db2777; font-weight: 800; }}
         .pulse-dot {{
-            width: 8px;
-            height: 8px;
-            background: #FF4B4B;
-            border-radius: 50%;
-            box-shadow: 0 0 10px #FF4B4B;
+            font-size: 16px;
             animation: eye-shimmer 1s infinite alternate;
             flex-shrink: 0;
         }}
         .hd-stage {{
-            height: 140px;
+            height: 150px;
             display: flex;
             align-items: flex-end;
             justify-content: center;
@@ -90,7 +92,12 @@ def gemini_retry_wait_html(remaining_seconds, total_timeout_left):
             display: flex;
             flex-direction: column;
             align-items: center;
-            animation: hd-bounce 0.5s ease-in-out infinite;
+            animation: hd-bounce 0.55s ease-in-out infinite;
+        }}
+        .hd-bow {{
+            font-size: 22px;
+            margin-bottom: -4px;
+            animation: bow-wiggle 1.2s ease-in-out infinite;
         }}
         .hd-antenna {{
             display: flex;
@@ -100,18 +107,18 @@ def gemini_retry_wait_html(remaining_seconds, total_timeout_left):
         .hd-bulb {{
             width: 10px;
             height: 10px;
-            background: linear-gradient(135deg, #FF4B4B, #B30000);
+            background: linear-gradient(135deg, #f9a8d4, #ec4899);
             border-radius: 50%;
-            box-shadow: 0 0 12px #FF4B4B;
+            box-shadow: 0 0 14px #f472b6;
         }}
-        .hd-stem {{ width: 3px; height: 10px; background: #515170; }}
+        .hd-stem {{ width: 3px; height: 10px; background: #f9a8d4; }}
         .hd-head {{
-            width: 56px;
-            height: 42px;
-            background: linear-gradient(135deg, #4DEEEA 0%, #20A4A1 100%);
-            border-radius: 14px;
+            width: 58px;
+            height: 44px;
+            background: linear-gradient(135deg, #fbcfe8 0%, #f9a8d4 100%);
+            border-radius: 16px;
             padding: 3px;
-            box-shadow: inset 0 2px 4px rgba(255,255,255,0.4), 0 4px 10px rgba(0,0,0,0.3);
+            box-shadow: inset 0 2px 4px rgba(255,255,255,0.7), 0 4px 12px rgba(236,72,153,0.3);
             display: flex;
             align-items: center;
             justify-content: center;
@@ -119,8 +126,8 @@ def gemini_retry_wait_html(remaining_seconds, total_timeout_left):
         .hd-glass-visor {{
             width: 100%;
             height: 100%;
-            background: rgba(15, 23, 42, 0.8);
-            border-radius: 10px;
+            background: rgba(255, 240, 246, 0.95);
+            border-radius: 12px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -129,32 +136,31 @@ def gemini_retry_wait_html(remaining_seconds, total_timeout_left):
         .hd-eye-glow {{
             width: 10px;
             height: 10px;
-            background: #FF4B4B;
+            background: #ec4899;
             border-radius: 50%;
             animation: eye-shimmer 0.5s infinite alternate;
         }}
         .hd-body {{
-            width: 64px;
-            height: 48px;
-            background: linear-gradient(135deg, #FFDE4D 0%, #D4AF37 100%);
-            border-radius: 8px;
+            width: 66px;
+            height: 50px;
+            background: linear-gradient(135deg, #e879f9 0%, #c084fc 100%);
+            border-radius: 10px;
             margin-top: -1px;
-            box-shadow: inset 0 2px 3px rgba(255,255,255,0.5), 0 4px 10px rgba(0,0,0,0.3);
+            box-shadow: inset 0 2px 3px rgba(255,255,255,0.5), 0 4px 12px rgba(192,132,252,0.35);
             display: flex;
             align-items: center;
             justify-content: center;
         }}
         .hd-dial {{
-            width: 24px;
-            height: 8px;
-            background: #1E1E2F;
-            border-radius: 4px;
+            font-size: 14px;
+            color: #fff;
+            font-weight: 700;
         }}
         .hd-legs {{ display: flex; gap: 16px; margin-top: -2px; }}
         .hd-leg {{
             width: 10px;
             height: 22px;
-            background: #33334D;
+            background: #f472b6;
             border-radius: 5px;
             transform-origin: top center;
         }}
@@ -163,7 +169,7 @@ def gemini_retry_wait_html(remaining_seconds, total_timeout_left):
         .hd-shadow {{
             width: 50px;
             height: 6px;
-            background: rgba(0,0,0,0.4);
+            background: rgba(219, 39, 119, 0.25);
             border-radius: 50%;
             margin-top: 4px;
             filter: blur(1px);
@@ -174,8 +180,9 @@ def gemini_retry_wait_html(remaining_seconds, total_timeout_left):
 
 SYNC_SUCCESS_CHARACTER_HTML = """
 <div class="hd-box">
-    <div class="hd-bubble">Sync completed successfully! Your live funnel is updated. ✨</div>
+    <div class="hd-bubble">Yay! Sync done — your funnel is all pretty and updated! 💖✨</div>
     <div class="hd-avatar">
+        <div class="hd-bow-top">🎀</div>
         <div class="hd-antenna-main">
             <div class="hd-orb"></div>
             <div class="hd-wire"></div>
@@ -189,48 +196,52 @@ SYNC_SUCCESS_CHARACTER_HTML = """
                 <div class="hd-speaking-mouth"></div>
             </div>
         </div>
-        <div class="hd-torso"><div class="hd-core-light"></div></div>
+        <div class="hd-torso"><div class="hd-core-light">♡</div></div>
         <div class="hd-floor-shadow"></div>
     </div>
 </div>
 <style>
     @keyframes float-hd {
-        0% { transform: translateY(0px); }
-        50% { transform: translateY(-10px); }
-        100% { transform: translateY(0px); }
+        0% { transform: translateY(0px) rotate(0deg); }
+        50% { transform: translateY(-12px) rotate(2deg); }
+        100% { transform: translateY(0px) rotate(0deg); }
     }
     @keyframes eye-blink-hd {
         0%, 92%, 100% { transform: scaleY(1); }
         96% { transform: scaleY(0.1); }
     }
     @keyframes hd-baby-talk {
-        0%, 100% { height: 4px; border-radius: 2px; width: 20px; }
-        50% { height: 12px; border-radius: 50%; width: 16px; background: #FF4B4B; }
+        0%, 100% { height: 4px; border-radius: 2px; width: 18px; background: #ec4899; }
+        50% { height: 12px; border-radius: 50%; width: 14px; background: #f472b6; }
+    }
+    @keyframes bow-spin {
+        0%, 100% { transform: rotate(-10deg) scale(1); }
+        50% { transform: rotate(10deg) scale(1.1); }
     }
     .hd-box {
         display: flex;
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        padding: 20px;
-        background: linear-gradient(135deg, #14142B 0%, #080811 100%);
-        border-radius: 24px;
-        border: 1px solid #222244;
-        box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        padding: 22px;
+        background: linear-gradient(135deg, #fff0f6 0%, #fce7f3 50%, #fae8ff 100%);
+        border-radius: 28px;
+        border: 2px solid #f9a8d4;
+        box-shadow: 0 20px 50px rgba(236, 72, 153, 0.3);
         animation: float-hd 3s ease-in-out infinite;
+        font-family: 'Quicksand', system-ui, sans-serif;
     }
     .hd-bubble {
         position: relative;
-        background: linear-gradient(135deg, #FFDE4D 0%, #F1C40F 100%);
-        border-radius: 20px;
+        background: linear-gradient(135deg, #fbcfe8 0%, #f9a8d4 100%);
+        border-radius: 22px;
         padding: 16px 24px;
         font-weight: 800;
-        color: #0C0C1E;
-        max-width: 300px;
+        color: #831843;
+        max-width: 320px;
         text-align: center;
-        font-family: system-ui, -apple-system, sans-serif;
-        box-shadow: 0 8px 24px rgba(241,196,15,0.3);
-        margin-bottom: 25px;
+        box-shadow: 0 8px 24px rgba(244, 114, 182, 0.35);
+        margin-bottom: 22px;
         font-size: 15px;
     }
     .hd-bubble::after {
@@ -241,7 +252,12 @@ SYNC_SUCCESS_CHARACTER_HTML = """
         transform: translateX(-50%);
         border-width: 10px 10px 0;
         border-style: solid;
-        border-color: #F1C40F transparent;
+        border-color: #f9a8d4 transparent;
+    }
+    .hd-bow-top {
+        font-size: 28px;
+        margin-bottom: 2px;
+        animation: bow-spin 2s ease-in-out infinite;
     }
     .hd-avatar {
         display: flex;
@@ -256,24 +272,24 @@ SYNC_SUCCESS_CHARACTER_HTML = """
     .hd-orb {
         width: 12px;
         height: 12px;
-        background: linear-gradient(135deg, #4DEEEA, #20A4A1);
+        background: linear-gradient(135deg, #f472b6, #e879f9);
         border-radius: 50%;
-        box-shadow: 0 0 15px #4DEEEA;
+        box-shadow: 0 0 15px #f472b6;
     }
-    .hd-wire { width: 4px; height: 12px; background: #3A3A55; }
+    .hd-wire { width: 4px; height: 12px; background: #f9a8d4; }
     .hd-robot-face {
-        width: 90px;
-        height: 68px;
-        background: linear-gradient(135deg, #2A2A40 0%, #1A1A2E 100%);
-        border-radius: 22px;
+        width: 92px;
+        height: 70px;
+        background: linear-gradient(135deg, #fbcfe8 0%, #f9a8d4 100%);
+        border-radius: 24px;
         padding: 5px;
-        box-shadow: inset 0 2px 4px rgba(255,255,255,0.2), 0 10px 25px rgba(0,0,0,0.4);
+        box-shadow: inset 0 2px 4px rgba(255,255,255,0.6), 0 10px 25px rgba(236,72,153,0.25);
     }
     .hd-screen-inner {
         width: 100%;
         height: 100%;
-        background: #09090F;
-        border-radius: 16px;
+        background: #fff0f6;
+        border-radius: 18px;
         display: flex;
         flex-direction: column;
         align-items: center;
@@ -283,51 +299,50 @@ SYNC_SUCCESS_CHARACTER_HTML = """
         overflow: hidden;
     }
     .hd-screen-inner::before {
-        content: '';
+        content: '✨';
         position: absolute;
-        top: 0; left: 0; right: 0; height: 50%;
-        background: linear-gradient(to bottom, rgba(255,255,255,0.08), transparent);
-        pointer-events: none;
+        top: 4px;
+        right: 8px;
+        font-size: 12px;
+        opacity: 0.7;
     }
     .hd-eyes-container { display: flex; gap: 20px; }
     .hd-neon-eye {
         width: 14px;
         height: 14px;
-        background: linear-gradient(135deg, #4DEEEA 0%, #00B4B4 100%);
+        background: linear-gradient(135deg, #ec4899 0%, #d946ef 100%);
         border-radius: 50%;
-        box-shadow: 0 0 12px #4DEEEA;
+        box-shadow: 0 0 12px #f472b6;
         animation: eye-blink-hd 4s infinite;
     }
     .hd-speaking-mouth {
-        width: 20px;
+        width: 18px;
         height: 4px;
-        background: #4DEEEA;
+        background: #ec4899;
         border-radius: 2px;
-        box-shadow: 0 0 6px #4DEEEA;
+        box-shadow: 0 0 6px #f472b6;
         animation: hd-baby-talk 0.22s ease-in-out infinite alternate;
     }
     .hd-torso {
-        width: 60px;
-        height: 30px;
-        background: linear-gradient(135deg, #FF4B4B 0%, #990000 100%);
-        border-radius: 0 0 16px 16px;
+        width: 62px;
+        height: 32px;
+        background: linear-gradient(135deg, #e879f9 0%, #c084fc 100%);
+        border-radius: 0 0 18px 18px;
         margin: -1px auto 0 auto;
         display: flex;
         align-items: center;
         justify-content: center;
-        box-shadow: 0 8px 16px rgba(0,0,0,0.3);
+        box-shadow: 0 8px 16px rgba(192, 132, 252, 0.35);
     }
     .hd-core-light {
-        width: 12px;
-        height: 12px;
-        background: #FFF;
-        border-radius: 50%;
-        box-shadow: 0 0 10px #FFF;
+        font-size: 14px;
+        color: #fff;
+        font-weight: 700;
     }
     .hd-floor-shadow {
         width: 70px;
         height: 6px;
-        background: rgba(0,0,0,0.6);
+        background: rgba(219, 39, 119, 0.25);
         border-radius: 50%;
         margin-top: 12px;
         filter: blur(2px);
@@ -338,18 +353,18 @@ SYNC_SUCCESS_CHARACTER_HTML = """
         if (!window.speechSynthesis) return;
         window.speechSynthesis.cancel();
         var phrase = new SpeechSynthesisUtterance(
-            'Sync completed successfully! Your live funnel is updated.'
+            'Yay! Sync completed successfully! Your live funnel is all updated!'
         );
         phrase.volume = 1.0;
-        phrase.pitch = 0.52;
-        phrase.rate = 0.92;
+        phrase.pitch = 1.35;
+        phrase.rate = 1.05;
         window.speechSynthesis.speak(phrase);
         phrase.onend = function() {
             var mouth = document.querySelector('.hd-speaking-mouth');
             if (mouth) {
                 mouth.style.animation = 'none';
                 mouth.style.height = '4px';
-                mouth.style.width = '20px';
+                mouth.style.width = '18px';
             }
         };
     }, 400);
