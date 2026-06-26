@@ -1,5 +1,5 @@
-/* Exponentia Bot — dreamy girly pink UI */
-@import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600;700&family=Pacifico&display=swap');
+/* Exponentia Bot — kawaii anime pink UI (◍•ᴗ•◍)❤ */
+@import url('https://fonts.googleapis.com/css2?family=Quicksand:wght@400;600;700&family=Pacifico&family=Mochiy+Pop+One&family=Kosugi+Maru&family=Yusei+Magic&display=swap');
 
 @keyframes fadeInUp {
   from { opacity: 0; transform: translateY(20px); }
@@ -51,6 +51,40 @@
   0%, 100% { transform: scale(1); }
   50% { transform: scale(1.15); }
 }
+@keyframes animeTitlePop {
+  0%, 100% { transform: scale(1) rotate(0deg); }
+  25% { transform: scale(1.04) rotate(-1.5deg); }
+  75% { transform: scale(1.04) rotate(1.5deg); }
+}
+@keyframes kaomojiBlink {
+  0%, 45%, 100% { opacity: 1; }
+  50%, 55% { opacity: 0.25; }
+}
+@keyframes sakuraFall {
+  0% {
+    transform: translateY(-12vh) translateX(0) rotate(0deg);
+    opacity: 0;
+  }
+  10% { opacity: 0.95; }
+  50% { transform: translateY(48vh) translateX(40px) rotate(220deg); }
+  90% { opacity: 0.7; }
+  100% {
+    transform: translateY(112vh) translateX(-30px) rotate(540deg);
+    opacity: 0;
+  }
+}
+@keyframes sakuraSway {
+  0%, 100% { margin-left: 0; }
+  50% { margin-left: 36px; }
+}
+@keyframes animeStarTwinkle {
+  0%, 100% { transform: scale(0.7) rotate(0deg); opacity: 0.35; }
+  50% { transform: scale(1.25) rotate(25deg); opacity: 1; filter: drop-shadow(0 0 8px #f9a8d4); }
+}
+@keyframes blushPulse {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50% { opacity: 0.9; transform: scale(1.12); }
+}
 
 .stApp,
 [data-testid="stAppViewContainer"] {
@@ -67,7 +101,7 @@
   ) !important;
   background-size: 400% 400% !important;
   animation: gradientShift 18s ease infinite !important;
-  font-family: 'Quicksand', sans-serif !important;
+  font-family: 'Kosugi Maru', 'Quicksand', sans-serif !important;
   color: #831843 !important;
 }
 
@@ -235,16 +269,25 @@ footer {
 }
 
 .hero-title {
-  font-family: 'Pacifico', cursive;
-  font-size: 2rem;
+  font-family: 'Mochiy Pop One', 'Pacifico', cursive;
+  font-size: 2.1rem;
   font-weight: 400;
   margin: 0;
+  letter-spacing: 0.01em;
   background: linear-gradient(90deg, #db2777, #c026d3, #ec4899, #f472b6, #db2777);
   background-size: 200% auto;
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
-  animation: shimmerTitle 5s linear infinite;
+  animation: shimmerTitle 5s linear infinite, animeTitlePop 3.2s ease-in-out infinite;
+  filter: drop-shadow(0 2px 6px rgba(236, 72, 153, 0.35));
+}
+.hero-title::after {
+  content: " ♡(◜‿◝)♡";
+  font-family: 'Yusei Magic', 'Quicksand', sans-serif;
+  font-size: 1rem;
+  -webkit-text-fill-color: #ec4899;
+  animation: kaomojiBlink 2.4s steps(1) infinite;
 }
 
 .hero-sub {
@@ -431,7 +474,63 @@ p, li, span, label, .stMarkdown {
   color: #831843;
 }
 
+/* 🌸 falling sakura petals + anime stars layer */
+.exp-bg-sakura {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.exp-bg-sakura .sakura {
+  position: absolute;
+  top: -8vh;
+  user-select: none;
+  will-change: transform, opacity;
+  animation: sakuraFall linear infinite, sakuraSway ease-in-out infinite;
+  filter: drop-shadow(0 2px 4px rgba(236, 72, 153, 0.35));
+}
+.exp-bg-sakura .anime-star {
+  position: absolute;
+  user-select: none;
+  animation: animeStarTwinkle ease-in-out infinite;
+}
+
+/* kawaii card accents */
+.glass-card { position: relative; }
+.glass-card::after {
+  content: "🌸";
+  position: absolute;
+  top: -10px;
+  left: -8px;
+  font-size: 1.4rem;
+  animation: pillWiggle 3.4s ease-in-out infinite;
+  filter: drop-shadow(0 2px 5px rgba(236, 72, 153, 0.35));
+}
+.card-heading::before {
+  content: "♡ ";
+  color: #ec4899;
+}
+
+/* anime blush on the floating logo */
+.hero-shell::after {
+  content: "(づ｡◕‿‿◕｡)づ";
+  position: absolute;
+  bottom: 10px;
+  right: 16px;
+  font-family: 'Yusei Magic', 'Quicksand', sans-serif;
+  font-size: 0.85rem;
+  color: #ec4899;
+  opacity: 0.85;
+  animation: pillWiggle 3s ease-in-out infinite;
+}
+
+div[data-testid="stButton"] > button::before {
+  content: "💕 ";
+}
+
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
-  .exp-bg-particles { display: none !important; }
+  .exp-bg-particles,
+  .exp-bg-sakura { display: none !important; }
 }

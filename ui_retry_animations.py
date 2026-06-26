@@ -6,9 +6,9 @@ def gemini_retry_wait_html(remaining_seconds, total_timeout_left):
     <div class="hd-wait-container">
         <div class="hd-status">
             <span class="pulse-dot">💗</span>
-            <strong>Gemini needs a tiny breather, babe.</strong>
+            <strong>ちょっと待ってね〜! Gemini-chan needs a tiny breather (๑˃ᴗ˂)ﻭ</strong>
             Retrying in <span>{remaining_seconds}s</span>
-            ({total_timeout_left}s sparkle-time left)
+            ({total_timeout_left}s sparkle-time left ✨)
         </div>
         <div class="hd-stage">
             <div class="hd-walker">
@@ -19,8 +19,10 @@ def gemini_retry_wait_html(remaining_seconds, total_timeout_left):
                 </div>
                 <div class="hd-head">
                     <div class="hd-glass-visor">
+                        <div class="hd-blush hd-blush-l"></div>
                         <div class="hd-eye-glow"></div>
                         <div class="hd-eye-glow"></div>
+                        <div class="hd-blush hd-blush-r"></div>
                     </div>
                 </div>
                 <div class="hd-body"><div class="hd-dial">♡</div></div>
@@ -140,6 +142,17 @@ def gemini_retry_wait_html(remaining_seconds, total_timeout_left):
             border-radius: 50%;
             animation: eye-shimmer 0.5s infinite alternate;
         }}
+        @keyframes blush-glow {{
+            0%, 100% {{ opacity: 0.55; transform: scale(1); }}
+            50% {{ opacity: 0.95; transform: scale(1.18); }}
+        }}
+        .hd-blush {{
+            width: 7px;
+            height: 5px;
+            background: radial-gradient(circle, #fb7185 0%, rgba(251,113,133,0) 70%);
+            border-radius: 50%;
+            animation: blush-glow 1.4s ease-in-out infinite;
+        }}
         .hd-body {{
             width: 66px;
             height: 50px;
@@ -180,7 +193,7 @@ def gemini_retry_wait_html(remaining_seconds, total_timeout_left):
 
 SYNC_SUCCESS_CHARACTER_HTML = """
 <div class="hd-box">
-    <div class="hd-bubble">Yay! Sync done — your funnel is all pretty and updated! 💖✨</div>
+    <div class="hd-bubble">やったー！ Sync done — your funnel is all pretty and updated! ♡(◍•ᴗ•◍)♡ 💖✨</div>
     <div class="hd-avatar">
         <div class="hd-bow-top">🎀</div>
         <div class="hd-antenna-main">
@@ -190,8 +203,10 @@ SYNC_SUCCESS_CHARACTER_HTML = """
         <div class="hd-robot-face">
             <div class="hd-screen-inner">
                 <div class="hd-eyes-container">
+                    <div class="hd-cheek hd-cheek-l"></div>
                     <div class="hd-neon-eye"></div>
                     <div class="hd-neon-eye"></div>
+                    <div class="hd-cheek hd-cheek-r"></div>
                 </div>
                 <div class="hd-speaking-mouth"></div>
             </div>
@@ -306,7 +321,18 @@ SYNC_SUCCESS_CHARACTER_HTML = """
         font-size: 12px;
         opacity: 0.7;
     }
-    .hd-eyes-container { display: flex; gap: 20px; }
+    .hd-eyes-container { display: flex; gap: 14px; align-items: center; }
+    @keyframes cheek-glow {
+        0%, 100% { opacity: 0.6; transform: scale(1); }
+        50% { opacity: 1; transform: scale(1.2); }
+    }
+    .hd-cheek {
+        width: 10px;
+        height: 7px;
+        background: radial-gradient(circle, #fb7185 0%, rgba(251,113,133,0) 72%);
+        border-radius: 50%;
+        animation: cheek-glow 1.5s ease-in-out infinite;
+    }
     .hd-neon-eye {
         width: 14px;
         height: 14px;
@@ -349,24 +375,80 @@ SYNC_SUCCESS_CHARACTER_HTML = """
     }
 </style>
 <script>
-    setTimeout(function() {
-        if (!window.speechSynthesis) return;
-        window.speechSynthesis.cancel();
-        var phrase = new SpeechSynthesisUtterance(
-            'Yay! Sync completed successfully! Your live funnel is all updated!'
-        );
-        phrase.volume = 1.0;
-        phrase.pitch = 1.35;
-        phrase.rate = 1.05;
-        window.speechSynthesis.speak(phrase);
-        phrase.onend = function() {
-            var mouth = document.querySelector('.hd-speaking-mouth');
-            if (mouth) {
-                mouth.style.animation = 'none';
-                mouth.style.height = '4px';
-                mouth.style.width = '18px';
+    (function() {
+        // ✨ cute sparkle chime (Web Audio) — a little kawaii arpeggio
+        function playChime() {
+            try {
+                var AC = window.AudioContext || window.webkitAudioContext;
+                if (!AC) return;
+                var ctx = new AC();
+                if (ctx.state === 'suspended') { ctx.resume(); }
+                // bright major-pentatonic sparkle: C6 E6 G6 C7 E7
+                var notes = [1046.5, 1318.5, 1568.0, 2093.0, 2637.0];
+                notes.forEach(function(freq, i) {
+                    var t = ctx.currentTime + i * 0.085;
+                    var osc = ctx.createOscillator();
+                    var gain = ctx.createGain();
+                    osc.type = 'triangle';
+                    osc.frequency.setValueAtTime(freq, t);
+                    gain.gain.setValueAtTime(0.0001, t);
+                    gain.gain.exponentialRampToValueAtTime(0.18, t + 0.02);
+                    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.45);
+                    osc.connect(gain).connect(ctx.destination);
+                    osc.start(t);
+                    osc.stop(t + 0.5);
+                });
+            } catch (e) {}
+        }
+
+        // 🎀 cute Japanese female voice
+        function pickJapaneseVoice(voices) {
+            var female = voices.filter(function(v) {
+                return /ja(-|_)JP/i.test(v.lang) || /japanese|日本語|kyoko|haruka|o-?ren|nanami|sayaka|ayumi/i.test(v.name);
+            });
+            // Prefer known female JP voices, else first JP voice, else any.
+            var preferred = female.find(function(v) {
+                return /kyoko|haruka|nanami|sayaka|ayumi|o-?ren|google 日本語/i.test(v.name);
+            });
+            return preferred || female[0] || null;
+        }
+
+        function speak() {
+            if (!window.speechSynthesis) return;
+            window.speechSynthesis.cancel();
+            var phrase = new SpeechSynthesisUtterance(
+                'やったー！同期完了だよっ！ファネルが全部きれいに更新されました！'
+            );
+            phrase.lang = 'ja-JP';
+            var voice = pickJapaneseVoice(window.speechSynthesis.getVoices());
+            if (voice) { phrase.voice = voice; phrase.lang = voice.lang; }
+            phrase.volume = 1.0;
+            phrase.pitch = 1.9;   // very cute / high
+            phrase.rate = 1.08;
+            phrase.onend = function() {
+                var mouth = document.querySelector('.hd-speaking-mouth');
+                if (mouth) {
+                    mouth.style.animation = 'none';
+                    mouth.style.height = '4px';
+                    mouth.style.width = '18px';
+                }
+            };
+            window.speechSynthesis.speak(phrase);
+        }
+
+        setTimeout(function() {
+            playChime();
+            // Voices can load asynchronously; wait for them if needed.
+            if (window.speechSynthesis && window.speechSynthesis.getVoices().length === 0) {
+                window.speechSynthesis.onvoiceschanged = function() {
+                    window.speechSynthesis.onvoiceschanged = null;
+                    speak();
+                };
+                setTimeout(speak, 600);
+            } else {
+                speak();
             }
-        };
-    }, 400);
+        }, 350);
+    })();
 </script>
 """
