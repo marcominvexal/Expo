@@ -1229,7 +1229,7 @@ STREAMLIT_DEPLOY_URL = (
 
 st.set_page_config(
     page_title="Exponentia Sales Bot",
-    page_icon="🎀",
+    page_icon="📞",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
@@ -1272,7 +1272,7 @@ def inject_custom_css():
                 doc.body.prepend(particles);
             }}
             if (particles.childElementCount === 0) {{
-                const colors = ["#f9a8d4", "#f472b6", "#e879f9", "#c084fc", "#fda4af", "#fbcfe8"];
+                const colors = ["#67e8f9", "#38bdf8", "#60a5fa", "#3b82f6", "#22d3ee"];
                 for (let i = 0; i < 50; i++) {{
                     const p = doc.createElement("span");
                     p.className = "particle";
@@ -1291,45 +1291,6 @@ def inject_custom_css():
                         "animation-delay:" + delay + "s," + (Math.random() * 2) + "s",
                     ].join(";");
                     particles.appendChild(p);
-                }}
-            }}
-            // 🌸 kawaii anime layer: falling sakura petals + twinkling stars
-            let sakura = doc.getElementById("exp-bot-sakura");
-            if (!sakura) {{
-                sakura = doc.createElement("div");
-                sakura.id = "exp-bot-sakura";
-                sakura.className = "exp-bg-sakura";
-                doc.body.prepend(sakura);
-            }}
-            if (sakura.childElementCount === 0) {{
-                const petals = ["🌸", "🌸", "💮", "🌷", "✿", "❀", "🎀"];
-                const stars = ["✦", "✧", "⋆", "✨", "⭐"];
-                for (let i = 0; i < 26; i++) {{
-                    const s = doc.createElement("span");
-                    s.className = "sakura";
-                    s.textContent = petals[i % petals.length];
-                    s.style.cssText = [
-                        "left:" + (Math.random() * 100) + "%",
-                        "font-size:" + (14 + Math.random() * 18) + "px",
-                        "animation-duration:" + (9 + Math.random() * 12) + "s," + (3 + Math.random() * 3) + "s",
-                        "animation-delay:" + (Math.random() * 14) + "s," + (Math.random() * 3) + "s",
-                        "opacity:" + (0.6 + Math.random() * 0.4),
-                    ].join(";");
-                    sakura.appendChild(s);
-                }}
-                for (let i = 0; i < 18; i++) {{
-                    const st = doc.createElement("span");
-                    st.className = "anime-star";
-                    st.textContent = stars[i % stars.length];
-                    st.style.cssText = [
-                        "left:" + (Math.random() * 100) + "%",
-                        "top:" + (Math.random() * 100) + "%",
-                        "color:" + (i % 2 ? "#e879f9" : "#f472b6"),
-                        "font-size:" + (10 + Math.random() * 16) + "px",
-                        "animation-duration:" + (2 + Math.random() * 3) + "s",
-                        "animation-delay:" + (Math.random() * 3) + "s",
-                    ].join(";");
-                    sakura.appendChild(st);
                 }}
             }}
         }})();
