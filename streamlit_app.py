@@ -629,16 +629,26 @@ def resolve_technology(service_raw, tech_raw):
     return tech_norm if tech_norm else "-"
 
 
-# Exponentia internal Quote ID only: 1–2 letters + up to 5 digits + "-" + 2-digit year
-# e.g. I835-26, F780-23. Explicitly rejects QTE-* (3+ letter partner refs) and long numeric Vodafone IDs.
+# Exponentia internal Quote ID: letter(s) + digits + "-" + 2-digit year
+# Real production IDs are almost always I###-26 / F###-##. Allow 1–2 letter prefix.
+# Explicitly rejects QTE-* (3+ letters) and long numeric partner/vendor IDs.
 EXPONENTIA_QUOTE_ID_RE = re.compile(
     r"\b([A-Za-z]{1,2})\s*0*(\d{1,5})\s*-\s*0*(\d{2})\b"
 )
+# Prefer classic sales tags I / F over accidental mid-body hits like BE4-06
+PREFERRED_QUOTE_PREFIXES = ("I", "F")
 PARTNER_QTE_REF_RE = re.compile(r"^QTE-", re.IGNORECASE)
 PARTNER_LONG_NUMERIC_REF_RE = re.compile(r"^\d{10,}-\d+$")
-ADD_AND_ARCHIVE_QUOTE_ID_RE = re.compile(
-    r"(?is)\b([A-Za-z]{1,2}\s*0*\d{1,5}\s*-\s*0*\d{2})\b(?=[^\n]{0,40}\bAdd\s+and\s+archive\b)"
-    r"|\b([A-Za-z]{1,2}\s*0*\d{1,5}\s*-\s*0*\d{2})\b[^\n]{0,40}\n[^\n]{0,20}\bAdd\s+and\s+archive\b"
+# Newest message tip ends when the quoted thread starts
+EMAIL_THREAD_SPLIT_RE = re.compile(
+    r"(?m)^(?:From:\s|Sent:\s|-----+ ?Original Message ?-----+|Begin forwarded message:)",
+    re.IGNORECASE,
+)
+EXPLICIT_QUOTE_ID_LABEL_RE = re.compile(
+    r"(?i)\bQuote\s*ID\s*[:\-–]?\s*([A-Za-z]{1,2}\s*0*\d{1,5}\s*-\s*0*\d{2})\b"
+)
+ADD_ARCHIVE_VARIANT_RE = re.compile(
+    r"(?is)\b(?:pls\s+)?(?:add|update(?:d)?)\s*(?:&|and)\s*archive\b"
 )
 
 
@@ -667,50 +677,99 @@ def looks_like_partner_quote_ref(value):
     return not is_valid_exponentia_quote_id(text)
 
 
+def _email_message_tip(text):
+    """Newest forward tip only — ignore older quoted replies that carry reference IDs."""
+    if not text:
+        return ""
+    normalized = text.replace("\r\n", "\n").replace("\r", "\n")
+    match = EMAIL_THREAD_SPLIT_RE.search(normalized)
+    # If the tip itself starts with From: (rare), keep a short window instead
+    if match and match.start() > 20:
+        return normalized[: match.start()]
+    return normalized[:2500]
+
+
+def _parse_quote_id_token(raw):
+    parsed = EXPONENTIA_QUOTE_ID_RE.search(str(raw or ""))
+    if not parsed:
+        return None
+    return _format_exponentia_quote_id(*parsed.groups())
+
+
 def find_exponentia_quote_ids_in_text(text):
     """
-    Pull Exponentia Quote IDs from an email body.
-    Prefers IDs tagged near 'Add and archive' (sales tagging convention),
-    then falls back to any valid I###-## / F###-## style match.
+    Pull the authoritative Exponentia Quote ID from an email.
+
+    Priority (newest message tip only):
+      1. Explicit 'Quote ID: I826-26' label
+      2. ID near Add/Update & archive sales tag
+      3. First I/F-prefixed ID in the tip
+      4. Broader fallback across the full body (I/F only)
     """
     if not text:
         return []
 
-    preferred = []
-    for match in ADD_AND_ARCHIVE_QUOTE_ID_RE.finditer(text):
-        raw = next((g for g in match.groups() if g), None)
-        if not raw:
-            continue
-        parsed = EXPONENTIA_QUOTE_ID_RE.search(raw)
-        if parsed:
-            preferred.append(_format_exponentia_quote_id(*parsed.groups()))
-
-    fallback = [
-        _format_exponentia_quote_id(prefix, number, year)
-        for prefix, number, year in EXPONENTIA_QUOTE_ID_RE.findall(text)
-    ]
-
+    tip = _email_message_tip(text)
     ordered = []
-    for candidate in preferred + fallback:
-        if candidate not in ordered:
+
+    def _push(candidate):
+        if candidate and candidate not in ordered:
             ordered.append(candidate)
+
+    # 1) Explicit label in tip
+    for match in EXPLICIT_QUOTE_ID_LABEL_RE.finditer(tip):
+        _push(_parse_quote_id_token(match.group(1)))
+
+    # 2) ID beside add/archive variants in tip
+    for archive_match in ADD_ARCHIVE_VARIANT_RE.finditer(tip):
+        window_start = max(0, archive_match.start() - 80)
+        window_end = min(len(tip), archive_match.end() + 80)
+        window = tip[window_start:window_end]
+        # Prefer IDs that appear BEFORE the archive phrase (sales convention)
+        before = tip[window_start: archive_match.start()]
+        for match in EXPONENTIA_QUOTE_ID_RE.finditer(before):
+            formatted = _format_exponentia_quote_id(*match.groups())
+            if formatted[0] in PREFERRED_QUOTE_PREFIXES:
+                _push(formatted)
+        for match in EXPONENTIA_QUOTE_ID_RE.finditer(window):
+            formatted = _format_exponentia_quote_id(*match.groups())
+            if formatted[0] in PREFERRED_QUOTE_PREFIXES:
+                _push(formatted)
+
+    # 3) First preferred-prefix IDs at top of tip (first ~12 non-empty lines)
+    tip_lines = [ln.strip() for ln in tip.split("\n") if ln.strip()][:12]
+    tip_head = "\n".join(tip_lines)
+    for match in EXPONENTIA_QUOTE_ID_RE.finditer(tip_head):
+        formatted = _format_exponentia_quote_id(*match.groups())
+        if formatted[0] in PREFERRED_QUOTE_PREFIXES:
+            _push(formatted)
+
+    if ordered:
+        return ordered
+
+    # 4) Full-body fallback — only I/F prefixes so we skip noise like BE4-06
+    for match in EXPONENTIA_QUOTE_ID_RE.finditer(text):
+        formatted = _format_exponentia_quote_id(*match.groups())
+        if formatted[0] in PREFERRED_QUOTE_PREFIXES:
+            _push(formatted)
     return ordered
 
 
 def normalize_quote_id(value, email_body=None):
     """
-    Keep only Exponentia internal Quote IDs (I835-26 / F780-23).
-    If Gemini returned a partner REF (QTE-…, long Vodafone IDs, subjects),
-    recover the real ID from the email body when possible.
+    Quote ID source of truth is the email tip (Add/archive / Quote ID: label).
+    Gemini's value is only used when the body has no recoverable Exponentia ID.
     """
-    text = str(value or "").strip()
-    if is_valid_exponentia_quote_id(text):
-        match = re.fullmatch(r"([A-Za-z]{1,2})\s*0*(\d{1,5})\s*-\s*0*(\d{2})", text)
-        return _format_exponentia_quote_id(*match.groups())
-
     recovered = find_exponentia_quote_ids_in_text(email_body)
     if recovered:
         return recovered[0]
+
+    text = str(value or "").strip()
+    if is_valid_exponentia_quote_id(text):
+        match = re.fullmatch(r"([A-Za-z]{1,2})\s*0*(\d{1,5})\s*-\s*0*(\d{2})", text)
+        formatted = _format_exponentia_quote_id(*match.groups())
+        if formatted[0] in PREFERRED_QUOTE_PREFIXES:
+            return formatted
 
     if text and not looks_like_partner_quote_ref(text):
         return text
@@ -947,7 +1006,8 @@ def get_ai_extraction(email_body, email_user):
     CRITICAL ALIGNMENT & TAXONOMY RULES:
     1. Quote ID (STRICT — Exponentia internal tracking ONLY):
        - MUST match the pattern ^[A-Za-z]{{1,2}}[0-9]{{1,5}}-[0-9]{{2}}$ — examples: 'I835-26', 'I673-26', 'F780-23', 'I698-26'.
-       - Authoritative source: the Exponentia sales tag near the top of the thread next to 'Add and archive' (e.g. "I835-26" then "Add and archive"). Prefer that over every other identifier in the email.
+       - Authoritative source: ONLY the newest message tip at the top of the thread — the sales tag next to 'Add and archive' / 'Add & archive' / 'Quote ID: I###-##' (e.g. "I835-26" then "Add and archive"). Prefer that over every other identifier in the email.
+       - NEVER use older 'Reference taken from I###-##' IDs, earlier thread Quote IDs, email subject titles, or partner refs.
        - NEVER use any of the following as Quote ID (these are partner/system RFQ refs, not ours):
          * Email subject titles
          * Anything starting with 'QTE-' (e.g. 'QTE-260713-12907-6128b')
