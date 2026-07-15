@@ -629,6 +629,94 @@ def resolve_technology(service_raw, tech_raw):
     return tech_norm if tech_norm else "-"
 
 
+# Exponentia internal Quote ID only: 1–2 letters + up to 5 digits + "-" + 2-digit year
+# e.g. I835-26, F780-23. Explicitly rejects QTE-* (3+ letter partner refs) and long numeric Vodafone IDs.
+EXPONENTIA_QUOTE_ID_RE = re.compile(
+    r"\b([A-Za-z]{1,2})\s*0*(\d{1,5})\s*-\s*0*(\d{2})\b"
+)
+PARTNER_QTE_REF_RE = re.compile(r"^QTE-", re.IGNORECASE)
+PARTNER_LONG_NUMERIC_REF_RE = re.compile(r"^\d{10,}-\d+$")
+ADD_AND_ARCHIVE_QUOTE_ID_RE = re.compile(
+    r"(?is)\b([A-Za-z]{1,2}\s*0*\d{1,5}\s*-\s*0*\d{2})\b(?=[^\n]{0,40}\bAdd\s+and\s+archive\b)"
+    r"|\b([A-Za-z]{1,2}\s*0*\d{1,5}\s*-\s*0*\d{2})\b[^\n]{0,40}\n[^\n]{0,20}\bAdd\s+and\s+archive\b"
+)
+
+
+def _format_exponentia_quote_id(prefix, number, year):
+    return f"{prefix.upper()}{int(number)}-{str(year).zfill(2)}"
+
+
+def is_valid_exponentia_quote_id(value):
+    text = str(value or "").strip()
+    if not text or text == "-":
+        return False
+    return bool(re.fullmatch(r"([A-Za-z]{1,2})\s*0*(\d{1,5})\s*-\s*0*(\d{2})", text))
+
+
+def looks_like_partner_quote_ref(value):
+    """True for partner/system RFQ refs that must never land in Quote ID."""
+    text = str(value or "").strip()
+    if not text or text == "-":
+        return False
+    if PARTNER_QTE_REF_RE.match(text):
+        return True
+    if PARTNER_LONG_NUMERIC_REF_RE.match(text):
+        return True
+    if re.search(r"\b(PID|BID|SP)[-:\s]", text, re.IGNORECASE):
+        return True
+    return not is_valid_exponentia_quote_id(text)
+
+
+def find_exponentia_quote_ids_in_text(text):
+    """
+    Pull Exponentia Quote IDs from an email body.
+    Prefers IDs tagged near 'Add and archive' (sales tagging convention),
+    then falls back to any valid I###-## / F###-## style match.
+    """
+    if not text:
+        return []
+
+    preferred = []
+    for match in ADD_AND_ARCHIVE_QUOTE_ID_RE.finditer(text):
+        raw = next((g for g in match.groups() if g), None)
+        if not raw:
+            continue
+        parsed = EXPONENTIA_QUOTE_ID_RE.search(raw)
+        if parsed:
+            preferred.append(_format_exponentia_quote_id(*parsed.groups()))
+
+    fallback = [
+        _format_exponentia_quote_id(prefix, number, year)
+        for prefix, number, year in EXPONENTIA_QUOTE_ID_RE.findall(text)
+    ]
+
+    ordered = []
+    for candidate in preferred + fallback:
+        if candidate not in ordered:
+            ordered.append(candidate)
+    return ordered
+
+
+def normalize_quote_id(value, email_body=None):
+    """
+    Keep only Exponentia internal Quote IDs (I835-26 / F780-23).
+    If Gemini returned a partner REF (QTE-…, long Vodafone IDs, subjects),
+    recover the real ID from the email body when possible.
+    """
+    text = str(value or "").strip()
+    if is_valid_exponentia_quote_id(text):
+        match = re.fullmatch(r"([A-Za-z]{1,2})\s*0*(\d{1,5})\s*-\s*0*(\d{2})", text)
+        return _format_exponentia_quote_id(*match.groups())
+
+    recovered = find_exponentia_quote_ids_in_text(email_body)
+    if recovered:
+        return recovered[0]
+
+    if text and not looks_like_partner_quote_ref(text):
+        return text
+    return "-"
+
+
 def is_exponentia_name(value):
     if not value:
         return False
@@ -857,7 +945,15 @@ def get_ai_extraction(email_body, email_user):
     You are an expert telecom data verification engine. Analyze the email thread and extract quoting matrix rows into clean structured objects.
 
     CRITICAL ALIGNMENT & TAXONOMY RULES:
-    1. Quote ID: Extract tracking identifier format matching expressions like 'I698-26' or 'F780-23'. Do NOT extract subject titles.
+    1. Quote ID (STRICT — Exponentia internal tracking ONLY):
+       - MUST match the pattern ^[A-Za-z]{{1,2}}[0-9]{{1,5}}-[0-9]{{2}}$ — examples: 'I835-26', 'I673-26', 'F780-23', 'I698-26'.
+       - Authoritative source: the Exponentia sales tag near the top of the thread next to 'Add and archive' (e.g. "I835-26" then "Add and archive"). Prefer that over every other identifier in the email.
+       - NEVER use any of the following as Quote ID (these are partner/system RFQ refs, not ours):
+         * Email subject titles
+         * Anything starting with 'QTE-' (e.g. 'QTE-260713-12907-6128b')
+         * Long numeric partner/vendor IDs (e.g. '202604221012101-6', '202604221012121-6')
+         * PID / BID / SP references
+       - If one email has multiple priced circuits/rows that share the same Exponentia Quote ID, repeat that SAME Exponentia Quote ID on every circuit object. Do NOT invent a different Quote ID per BW/capacity row from the partner REF column.
 
     2. Opportunity Date (HYPER-MINIMAL TAT LOGIC):
        - OBJECTIVE: Calculate the absolute lowest logically defensible Turnaround Time (TAT) for our sales engineering execution.
@@ -1144,10 +1240,11 @@ def run_bot():
                     xc_status = normalize_xc_status(c.get('XC Included/Excluded'))
 
                 offered_us = normalize_offered_us(c.get('Offered Us'))
+                quote_id = normalize_quote_id(c.get('Quote ID', '-'), email_body=body)
 
                 new_rows.append([
                     last_s_no,                                          # 1. S.NO
-                    c.get('Quote ID', '-'),                             # 2. Quote ID
+                    quote_id,                                           # 2. Quote ID
                     opp_formatted,                                      # 3. Opportunity date
                     partner_name,                                       # 4. Partner name
                     end_customer,                                       # 5. End customer
