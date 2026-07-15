@@ -1498,7 +1498,7 @@ if not creds_ok:
         st.markdown(
             "**Checklist:** `[gcp_service_account]` header on its own line · "
             "multiline `private_key` in triple quotes · **Save** · **Reboot app** · "
-            "share sheet with `marcom@exponentia-project.iam.gserviceaccount.com`"
+            "share the Google Sheet with the service account `client_email`."
         )
     st.stop()
 
