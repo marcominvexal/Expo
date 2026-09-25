@@ -629,13 +629,18 @@ def resolve_technology(service_raw, tech_raw):
     return tech_norm if tech_norm else "-"
 
 
-# Exponentia internal Quote ID ONLY: I###-## or F###-## (e.g. I835-26, F780-23).
+# Exponentia internal Quote ID ONLY: one prefix letter F–Z + ###-## (e.g. I835-26, F780-23, G101-26).
 # Never accept subject-line partner refs (QTE-…, long Colt/Vodafone numbers, PID/BID/SP).
-EXPONENTIA_QUOTE_ID_RE = re.compile(
-    r"\b([IF])\s*0*(\d{1,5})\s*-\s*0*(\d{2})\b",
+QUOTE_ID_PREFIX_CLASS = "[F-Z]"
+QUOTE_ID_FULL_RE = re.compile(
+    rf"({QUOTE_ID_PREFIX_CLASS})\s*0*(\d{{1,5}})\s*-\s*0*(\d{{2}})",
     re.IGNORECASE,
 )
-PREFERRED_QUOTE_PREFIXES = ("I", "F")
+EXPONENTIA_QUOTE_ID_RE = re.compile(
+    rf"\b({QUOTE_ID_PREFIX_CLASS})\s*0*(\d{{1,5}})\s*-\s*0*(\d{{2}})\b",
+    re.IGNORECASE,
+)
+PREFERRED_QUOTE_PREFIXES = tuple(chr(c) for c in range(ord("F"), ord("Z") + 1))
 PARTNER_QTE_REF_RE = re.compile(r"^QTE-", re.IGNORECASE)
 PARTNER_LONG_NUMERIC_REF_RE = re.compile(r"^\d{10,}-\d+$")
 # Newest message tip ends when the quoted thread starts
@@ -644,7 +649,7 @@ EMAIL_THREAD_SPLIT_RE = re.compile(
     re.IGNORECASE,
 )
 EXPLICIT_QUOTE_ID_LABEL_RE = re.compile(
-    r"(?i)\bQuote\s*ID\s*[:\-–]?\s*([IF]\s*0*\d{1,5}\s*-\s*0*\d{2})\b"
+    rf"(?i)\bQuote\s*ID\s*[:\-–]?\s*({QUOTE_ID_PREFIX_CLASS}\s*0*\d{{1,5}}\s*-\s*0*\d{{2}})\b"
 )
 ADD_ARCHIVE_VARIANT_RE = re.compile(
     r"(?is)\b(?:pls\s+)?(?:add|update(?:d)?)\s*(?:&|and)\s*archive\b"
@@ -656,15 +661,15 @@ def _format_exponentia_quote_id(prefix, number, year):
 
 
 def is_valid_exponentia_quote_id(value):
-    """Only I###-## / F###-## — nothing else counts as a Quote ID."""
+    """Only F###-## through Z###-## (e.g. I###-##) — nothing else counts as a Quote ID."""
     text = str(value or "").strip()
     if not text or text == "-":
         return False
-    return bool(re.fullmatch(r"([IF])\s*0*(\d{1,5})\s*-\s*0*(\d{2})", text, re.IGNORECASE))
+    return bool(QUOTE_ID_FULL_RE.fullmatch(text))
 
 
 def looks_like_partner_quote_ref(value):
-    """True for anything that is not a strict I###-## / F###-## Quote ID."""
+    """True for anything that is not a strict F###-##…Z###-## Quote ID."""
     text = str(value or "").strip()
     if not text or text == "-":
         return False
@@ -693,13 +698,13 @@ def find_exponentia_quote_ids_in_text(text):
     """
     Pull the authoritative Exponentia Quote ID from the email BODY only.
 
-    Never uses the subject line. Only accepts I###-## / F###-##.
+    Never uses the subject line. Only accepts F###-## through Z###-##.
 
     Priority (newest message tip):
       1. Explicit 'Quote ID: I826-26' label
       2. ID near Add/Update & archive sales tag
-      3. First I/F ID in the tip
-      4. Broader fallback across the full body (I/F only)
+      3. First F–Z ID in the tip
+      4. Broader fallback across the full body (F–Z only)
     """
     if not text:
         return []
@@ -739,7 +744,7 @@ def find_exponentia_quote_ids_in_text(text):
 
 def normalize_quote_id(value, email_body=None):
     """
-    Quote ID comes ONLY from the email body as I###-## / F###-##.
+    Quote ID comes ONLY from the email body as F###-## through Z###-##.
     Subject lines and Gemini guesses (QTE-…, Colt numbers, etc.) are ignored.
     """
     recovered = find_exponentia_quote_ids_in_text(email_body)
@@ -748,7 +753,7 @@ def normalize_quote_id(value, email_body=None):
 
     text = str(value or "").strip()
     if is_valid_exponentia_quote_id(text):
-        match = re.fullmatch(r"([IF])\s*0*(\d{1,5})\s*-\s*0*(\d{2})", text, re.IGNORECASE)
+        match = QUOTE_ID_FULL_RE.fullmatch(text)
         return _format_exponentia_quote_id(*match.groups())
 
     return "-"
@@ -1023,7 +1028,7 @@ def get_ai_extraction(email_body, email_user):
 
     CRITICAL ALIGNMENT & TAXONOMY RULES:
     1. Quote ID (STRICT — Exponentia internal tracking ONLY):
-       - MUST match EXACTLY ^[IF][0-9]{{1,5}}-[0-9]{{2}}$ — only forms like 'I835-26', 'I673-26', 'F780-23', 'I698-26'.
+       - MUST match EXACTLY ^[F-Z][0-9]{{1,5}}-[0-9]{{2}}$ — one prefix letter F through Z, e.g. 'I835-26', 'F780-23', 'G101-26', 'Z042-26'.
        - Source: ONLY the email BODY (never the Subject line). Look in the newest tip for 'Add and archive' / 'Add & archive' / 'Quote ID: I###-##'.
        - NEVER use Subject-line tokens such as 'QTE-260713-12907-6128b' or '20260710081136-5'.
        - NEVER use older 'Reference taken from I###-##' IDs, earlier thread Quote IDs, or any partner/system RFQ refs (QTE-*, long numeric IDs, PID/BID/SP).
@@ -1265,7 +1270,7 @@ def run_bot():
 
             # Body only — Subject is never used for Quote ID.
             body = extract_email_text_body(msg)
-            # Force Quote ID from body I###-## / F###-## before Gemini can invent subject refs.
+            # Force Quote ID from body F###-##…Z###-## before Gemini can invent subject refs.
             forced_quote_id = normalize_quote_id(None, email_body=body)
 
             ai_data = get_ai_extraction(body, email_user)
@@ -1311,7 +1316,7 @@ def run_bot():
                     xc_status = normalize_xc_status(c.get('XC Included/Excluded'))
 
                 offered_us = normalize_offered_us(c.get('Offered Us'))
-                # Ignore Gemini Quote ID entirely when body already has I###-## / F###-##.
+                # Ignore Gemini Quote ID entirely when body already has F###-##…Z###-##.
                 quote_id = forced_quote_id if forced_quote_id != "-" else normalize_quote_id(c.get('Quote ID', '-'), email_body=body)
 
                 new_rows.append([
@@ -1604,7 +1609,7 @@ with st.expander("📋 How each column is filled — Extraction & Automation Rul
 ---
 
 #### 🆔 Quote ID
-Only Exponentia internal IDs like **I835-26** or **F780-23** are accepted.
+Only Exponentia internal IDs with a prefix letter **F** through **Z** (e.g. **I835-26**, **F780-23**, **G101-26**) are accepted.
 The bot reads the email **body only** (never the subject line) and looks for the sales tag near *"Add and archive"* or a *"Quote ID: …"* label.
 Partner references (QTE-…, Vodafone numbers, PID/BID/SP) are always rejected.
 
