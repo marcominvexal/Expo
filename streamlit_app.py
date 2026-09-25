@@ -633,11 +633,11 @@ def resolve_technology(service_raw, tech_raw):
 # Never accept subject-line partner refs (QTE-…, long Colt/Vodafone numbers, PID/BID/SP).
 QUOTE_ID_PREFIX_CLASS = "[F-Z]"
 QUOTE_ID_FULL_RE = re.compile(
-    rf"({QUOTE_ID_PREFIX_CLASS})\s*0*(\d{{1,5}})\s*-\s*0*(\d{{2}})",
+    rf"({QUOTE_ID_PREFIX_CLASS})\s*(\d{{1,5}})\s*-\s*0*(\d{{2}})",
     re.IGNORECASE,
 )
 EXPONENTIA_QUOTE_ID_RE = re.compile(
-    rf"\b({QUOTE_ID_PREFIX_CLASS})\s*0*(\d{{1,5}})\s*-\s*0*(\d{{2}})\b",
+    rf"\b({QUOTE_ID_PREFIX_CLASS})\s*(\d{{1,5}})\s*-\s*0*(\d{{2}})\b",
     re.IGNORECASE,
 )
 PREFERRED_QUOTE_PREFIXES = tuple(chr(c) for c in range(ord("F"), ord("Z") + 1))
@@ -649,7 +649,7 @@ EMAIL_THREAD_SPLIT_RE = re.compile(
     re.IGNORECASE,
 )
 EXPLICIT_QUOTE_ID_LABEL_RE = re.compile(
-    rf"(?i)\bQuote\s*ID\s*[:\-–]?\s*({QUOTE_ID_PREFIX_CLASS}\s*0*\d{{1,5}}\s*-\s*0*\d{{2}})\b"
+    rf"(?i)\bQuote\s*ID\s*[:\-–]?\s*({QUOTE_ID_PREFIX_CLASS}\s*\d{{1,5}}\s*-\s*0*\d{{2}})\b"
 )
 ADD_ARCHIVE_VARIANT_RE = re.compile(
     r"(?is)\b(?:pls\s+)?(?:add|update(?:d)?)\s*(?:&|and)\s*archive\b"
@@ -657,7 +657,7 @@ ADD_ARCHIVE_VARIANT_RE = re.compile(
 
 
 def _format_exponentia_quote_id(prefix, number, year):
-    return f"{prefix.upper()}{int(number)}-{str(year).zfill(2)}"
+    return f"{prefix.upper()}{number}-{str(year).zfill(2)}"
 
 
 def is_valid_exponentia_quote_id(value):
