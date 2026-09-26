@@ -629,15 +629,16 @@ def resolve_technology(service_raw, tech_raw):
     return tech_norm if tech_norm else "-"
 
 
-# Exponentia internal Quote ID ONLY: one prefix letter F–Z + ###-## (e.g. I835-26, F780-23, G101-26).
+# Exponentia internal Quote ID ONLY: one prefix letter F–Z + ###-## (e.g. I835-26, F780-23, G001-26).
+# Always written as letter + 3-digit number + 2-digit year: I1-23 and I001-023 both become I001-23.
 # Never accept subject-line partner refs (QTE-…, long Colt/Vodafone numbers, PID/BID/SP).
 QUOTE_ID_PREFIX_CLASS = "[F-Z]"
 QUOTE_ID_FULL_RE = re.compile(
-    rf"({QUOTE_ID_PREFIX_CLASS})\s*(\d{{1,5}})\s*-\s*0*(\d{{2}})",
+    rf"({QUOTE_ID_PREFIX_CLASS})\s*(\d{{1,5}})\s*-\s*(\d{{2,4}})",
     re.IGNORECASE,
 )
 EXPONENTIA_QUOTE_ID_RE = re.compile(
-    rf"\b({QUOTE_ID_PREFIX_CLASS})\s*(\d{{1,5}})\s*-\s*0*(\d{{2}})\b",
+    rf"\b({QUOTE_ID_PREFIX_CLASS})\s*(\d{{1,5}})\s*-\s*(\d{{2,4}})\b",
     re.IGNORECASE,
 )
 PREFERRED_QUOTE_PREFIXES = tuple(chr(c) for c in range(ord("F"), ord("Z") + 1))
@@ -649,7 +650,7 @@ EMAIL_THREAD_SPLIT_RE = re.compile(
     re.IGNORECASE,
 )
 EXPLICIT_QUOTE_ID_LABEL_RE = re.compile(
-    rf"(?i)\bQuote\s*ID\s*[:\-–]?\s*({QUOTE_ID_PREFIX_CLASS}\s*\d{{1,5}}\s*-\s*0*\d{{2}})\b"
+    rf"(?i)\bQuote\s*ID\s*[:\-–]?\s*({QUOTE_ID_PREFIX_CLASS}\s*\d{{1,5}}\s*-\s*\d{{2,4}})\b"
 )
 ADD_ARCHIVE_VARIANT_RE = re.compile(
     r"(?is)\b(?:pls\s+)?(?:add|update(?:d)?)\s*(?:&|and)\s*archive\b"
@@ -657,7 +658,8 @@ ADD_ARCHIVE_VARIANT_RE = re.compile(
 
 
 def _format_exponentia_quote_id(prefix, number, year):
-    return f"{prefix.upper()}{number}-{str(year).zfill(2)}"
+    """Canonical form: one letter, 3-digit number, 2-digit year — I835-26, I001-23."""
+    return f"{prefix.upper()}{int(number):03d}-{int(year) % 100:02d}"
 
 
 def is_valid_exponentia_quote_id(value):
@@ -1028,7 +1030,8 @@ def get_ai_extraction(email_body, email_user):
 
     CRITICAL ALIGNMENT & TAXONOMY RULES:
     1. Quote ID (STRICT — Exponentia internal tracking ONLY):
-       - MUST match EXACTLY ^[F-Z][0-9]{{1,5}}-[0-9]{{2}}$ — one prefix letter F through Z, e.g. 'I835-26', 'F780-23', 'G101-26', 'Z042-26'.
+       - MUST match EXACTLY ^[F-Z][0-9]{{3}}-[0-9]{{2}}$ — one prefix letter F through Z, e.g. 'I835-26', 'F780-23', 'G101-26', 'I001-23'.
+       - Canonical form is letter + 3-digit number + 2-digit year: keep leading zeros ('I001-23', never 'I1-23').
        - Source: ONLY the email BODY (never the Subject line). Look in the newest tip for 'Add and archive' / 'Add & archive' / 'Quote ID: I###-##'.
        - NEVER use Subject-line tokens such as 'QTE-260713-12907-6128b' or '20260710081136-5'.
        - NEVER use older 'Reference taken from I###-##' IDs, earlier thread Quote IDs, or any partner/system RFQ refs (QTE-*, long numeric IDs, PID/BID/SP).
@@ -1155,6 +1158,9 @@ def reapply_all_rules_and_align_sheet():
             row.append("-")
 
         quote_id = str(row[1]).strip() if row[1] else "-"
+        # Re-pad older rows (I1-23 -> I001-23); leave anything that isn't a Quote ID untouched.
+        if is_valid_exponentia_quote_id(quote_id):
+            quote_id = normalize_quote_id(quote_id)
         opp_raw = row[2]
         partner_raw = row[3]
         customer_raw = row[4]
