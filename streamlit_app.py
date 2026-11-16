@@ -3,6 +3,7 @@ import base64
 import imaplib
 import email
 from email.utils import parseaddr
+from email.header import decode_header, make_header
 import json
 import re
 import time
@@ -12,6 +13,7 @@ import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from google import genai
+from google.genai import types as genai_types
 from google.oauth2.service_account import Credentials
 
 from ui_retry_animations import SYNC_SUCCESS_CHARACTER_HTML, gemini_retry_wait_html, sync_success_sticker_html
@@ -26,6 +28,7 @@ WORKSHEET_GID = 0
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit#gid={WORKSHEET_GID}"
 # gemini-2.5-flash is closed to new API keys. Tried in order; set GEMINI_MODEL (comma-separated) in secrets to override.
 DEFAULT_GEMINI_MODELS = ("gemini-3.5-flash", "gemini-3.8-flash")
+GEMINI_REQUEST_TIMEOUT_SECONDS = 90
 SYNC_SUCCESS_STICKER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "sync-success.webp")
 SYNC_SUCCESS_YAY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "sync-yay.mp3")
 
@@ -256,7 +259,11 @@ def get_genai_client():
     key = env_or_secret("GEMINI_API_KEY")
     if not key:
         raise ValueError("Set GEMINI_API_KEY in secrets.env or Streamlit secrets.")
-    return genai.Client(api_key=key)
+    # Without a timeout one stuck request hangs the whole sync; this makes it fail into the retry loop.
+    return genai.Client(
+        api_key=key,
+        http_options=genai_types.HttpOptions(timeout=GEMINI_REQUEST_TIMEOUT_SECONDS * 1000),
+    )
 
 
 def parse_currency_number(value):
@@ -1047,10 +1054,14 @@ def _is_gemini_spend_cap_error(exc):
 def _is_retryable_gemini_error(exc):
     if _is_gemini_spend_cap_error(exc):
         return False
+    # A request cut off by the 90s limit comes back as 504 DEADLINE_EXCEEDED; a connection that goes
+    # silent surfaces as a network timeout instead. Both mean "busy, try again or try the other model".
+    if isinstance(exc, TimeoutError) or "TIMEOUT" in type(exc).__name__.upper():
+        return True
     error_str = str(exc).upper()
     return any(
         token in error_str
-        for token in ("503", "UNAVAILABLE", "504", "DEADLINE_EXCEEDED", "429", "RESOURCE_EXHAUSTED")
+        for token in ("503", "UNAVAILABLE", "504", "DEADLINE_EXCEEDED", "429", "RESOURCE_EXHAUSTED", "TIMED OUT")
     )
 
 
@@ -1063,7 +1074,7 @@ def gemini_models():
 
 
 def get_ai_extraction(email_body, email_user):
-    """Extract data with a 60s retry loop and animated wait UI on 503/429."""
+    """Extract data, switching models and retrying (with the animated wait UI) when Gemini is busy or slow."""
     prompt = f"""
     You are an expert telecom data verification engine. Analyze the email thread and extract quoting matrix rows into clean structured objects.
 
@@ -1117,7 +1128,10 @@ def get_ai_extraction(email_body, email_user):
 
     models = gemini_models()
 
-    while (time.time() - start_overall_time) < retry_limit_seconds:
+    # Each request is capped at GEMINI_REQUEST_TIMEOUT_SECONDS. The first round always tries every
+    # model once, even if one of them used up the time by timing out; the 60s window only governs
+    # the waits between later rounds.
+    while True:
         try:
             response = get_genai_client().models.generate_content(
                 model=models[attempt_count % len(models)],
@@ -1140,7 +1154,7 @@ def get_ai_extraction(email_body, email_user):
                 anim_placeholder.empty()
                 raise
 
-            # A different model is often free when one is overloaded: switch before waiting.
+            # A different model is often free when one is overloaded or stuck: switch before waiting.
             if len(models) > 1 and (attempt_count + 1) % len(models) != 0:
                 attempt_count += 1
                 continue
@@ -1149,7 +1163,10 @@ def get_ai_extraction(email_body, email_user):
             time_remaining_total = max(0, int(retry_limit_seconds - time_elapsed))
             if time_remaining_total <= 0:
                 anim_placeholder.empty()
-                raise exc
+                raise TimeoutError(
+                    f"Gemini is overloaded or not responding ({', '.join(models)} all busy) — "
+                    f"gave up after {int(time_elapsed)}s."
+                ) from exc
 
             sleep_interval = min(5 + (attempt_count * 2), time_remaining_total)
             attempt_count += 1
@@ -1161,11 +1178,6 @@ def get_ai_extraction(email_body, email_user):
                     unsafe_allow_html=True,
                 )
                 time.sleep(1)
-
-    anim_placeholder.empty()
-    raise TimeoutError(
-        "Gemini Engine overloaded. System timed out automatically after retrying for 1 minute."
-    )
 
 
 def quote_id_sort_key(quote_id):
@@ -1296,6 +1308,16 @@ def reapply_all_rules_and_align_sheet():
     )
 
 
+def _decoded_header(value, limit=70):
+    """Readable From/Subject for the progress line (handles =?UTF-8?…?= encoded headers)."""
+    try:
+        text = str(make_header(decode_header(value or "")))
+    except Exception:
+        text = str(value or "")
+    text = " ".join(text.split())
+    return text if len(text) <= limit else text[: limit - 1] + "…"
+
+
 def summarize_sync_result(rows_added, emails_processed, failed_emails, unattempted, stop_reason, mark_read_error):
     """One message for the sync button: ✅ only when every unread email was handled."""
     left_unread = len(failed_emails) + unattempted
@@ -1355,8 +1377,10 @@ def run_bot():
         processed_uids = []
         failed_emails = []
         stop_reason = None
+        progress = st.empty()
+        total = len(email_uids)
 
-        for uid in email_uids:
+        for index, uid in enumerate(email_uids, start=1):
             _, data = mail.uid('FETCH', uid, '(BODY.PEEK[])')
             raw_message = next((part[1] for part in data if isinstance(part, tuple)), None)
             if raw_message is None:
@@ -1364,6 +1388,11 @@ def run_bot():
                 continue
             msg = email.message_from_bytes(raw_message)
             email_from = msg.get("From", "")
+            progress.progress(
+                (index - 1) / total,
+                text=f"📨 Email {index} of {total} — {_decoded_header(email_from) or 'unknown sender'}: "
+                     f"{_decoded_header(msg.get('Subject')) or '(no subject)'}",
+            )
 
             # Body only — Subject is never used for Quote ID.
             body = extract_email_text_body(msg)
@@ -1376,7 +1405,11 @@ def run_bot():
                 failed_emails.append(f"{email_from or 'unknown sender'} ({exc})")
                 # Gemini itself is down (spend cap or still overloaded after retrying): every
                 # remaining email would fail the same way, so stop instead of waiting on each one.
-                if isinstance(exc, TimeoutError) or _is_gemini_spend_cap_error(exc)                         or _is_gemini_spend_cap_error(exc.__cause__ or ""):
+                if (
+                    isinstance(exc, TimeoutError)
+                    or _is_gemini_spend_cap_error(exc)
+                    or _is_gemini_spend_cap_error(exc.__cause__ or "")
+                ):
                     stop_reason = str(exc)
                     break
                 continue
@@ -1481,6 +1514,8 @@ def run_bot():
                 )
             except Exception:
                 pass
+
+        progress.empty()
 
         # Only now — with the rows saved — mark the processed emails as read.
         mark_read_error = None
