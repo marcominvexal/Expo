@@ -5,7 +5,7 @@ Sales funnel automation for **Exponentia Global**: sync unread Gmail quote email
 ## Features
 
 - Reads unread quote emails via Gmail (IMAP)
-- Extracts circuit rows with Gemini 2.5 Flash (strict JSON schema)
+- Extracts circuit rows with Gemini Flash (3.5, falling back to 3.8 when busy; strict JSON schema; override with `GEMINI_MODEL`)
 - Appends rows to the live Google Sheets funnel
 - Streamlit UI for one-click sync
 

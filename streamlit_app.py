@@ -23,6 +23,8 @@ SCOPE = ["https://www.googleapis.com/auth/spreadsheets", "https://www.googleapis
 SPREADSHEET_ID = "1E9gYdeZUwMEmnwe164io7E47QuXnBfYcELdulUroN_4"
 WORKSHEET_GID = 0
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit#gid={WORKSHEET_GID}"
+# gemini-2.5-flash is closed to new API keys. Tried in order; set GEMINI_MODEL (comma-separated) in secrets to override.
+DEFAULT_GEMINI_MODELS = ("gemini-3.5-flash", "gemini-3.8-flash")
 
 
 def env_or_secret(key, default=None):
@@ -1018,9 +1020,27 @@ GEMINI_CIRCUITS_SCHEMA = {
 }
 
 
+def _is_gemini_spend_cap_error(exc):
+    """The project's monthly spending cap is hit — retrying cannot succeed until it is raised."""
+    return "SPENDING CAP" in str(exc).upper() or "SPEND CAP" in str(exc).upper()
+
+
 def _is_retryable_gemini_error(exc):
+    if _is_gemini_spend_cap_error(exc):
+        return False
     error_str = str(exc).upper()
-    return any(token in error_str for token in ("503", "UNAVAILABLE", "429", "RESOURCE_EXHAUSTED"))
+    return any(
+        token in error_str
+        for token in ("503", "UNAVAILABLE", "504", "DEADLINE_EXCEEDED", "429", "RESOURCE_EXHAUSTED")
+    )
+
+
+def gemini_models():
+    """Models to try in order; a busy model falls through to the next one on retry."""
+    configured = env_or_secret("GEMINI_MODEL")
+    if configured:
+        return [m.strip() for m in str(configured).split(",") if m.strip()]
+    return list(DEFAULT_GEMINI_MODELS)
 
 
 def get_ai_extraction(email_body, email_user):
@@ -1076,10 +1096,12 @@ def get_ai_extraction(email_body, email_user):
     anim_placeholder = st.empty()
     retry_limit_seconds = 60
 
+    models = gemini_models()
+
     while (time.time() - start_overall_time) < retry_limit_seconds:
         try:
             response = get_genai_client().models.generate_content(
-                model="gemini-2.5-flash",
+                model=models[attempt_count % len(models)],
                 contents=prompt,
                 config={
                     'response_mime_type': 'application/json',
@@ -1089,9 +1111,20 @@ def get_ai_extraction(email_body, email_user):
             anim_placeholder.empty()
             return json.loads(response.text)
         except Exception as exc:
+            if _is_gemini_spend_cap_error(exc):
+                anim_placeholder.empty()
+                raise RuntimeError(
+                    "Gemini monthly spending cap reached — raise it at https://ai.studio/spend, "
+                    "or use a GEMINI_API_KEY from another project."
+                ) from exc
             if not _is_retryable_gemini_error(exc):
                 anim_placeholder.empty()
                 raise
+
+            # A different model is often free when one is overloaded: switch before waiting.
+            if len(models) > 1 and (attempt_count + 1) % len(models) != 0:
+                attempt_count += 1
+                continue
 
             time_elapsed = time.time() - start_overall_time
             time_remaining_total = max(0, int(retry_limit_seconds - time_elapsed))
