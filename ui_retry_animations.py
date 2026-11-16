@@ -358,7 +358,7 @@ SYNC_SUCCESS_CHARACTER_HTML = """
 
 
 
-def sync_success_sticker_html(image_data_uri):
+def sync_success_sticker_html(image_data_uri, yay_audio_data_uri=None):
     """Sync success: sticker pops up, giggles, says "Yay!" with party poppers, then goes back."""
     colors = ["#FFDE4D", "#FF5E8A", "#4DD8FF", "#7CFF6B", "#B27CFF", "#FF9F43"]
     confetti = []
@@ -536,8 +536,9 @@ def sync_success_sticker_html(image_data_uri):
         font-weight: 600;
     }}
 </style>
+{f'<audio id="ss-yay-clip" preload="auto" src="{yay_audio_data_uri}"></audio>' if yay_audio_data_uri else ''}
 <script>
-    setTimeout(function() {{
+    function ssSpeakYay() {{
         if (!window.speechSynthesis) return;
         window.speechSynthesis.cancel();
         // Sing-song "Yaaayyy!": a stretched high note that swoops up.
@@ -551,6 +552,14 @@ def sync_success_sticker_html(image_data_uri):
         yay2.rate = 0.85;
         window.speechSynthesis.speak(yay);
         window.speechSynthesis.speak(yay2);
+    }}
+    setTimeout(function() {{
+        // Prefer the recorded clip; fall back to the browser voice if it is missing or autoplay is blocked.
+        var clip = document.getElementById('ss-yay-clip');
+        if (!clip) {{ ssSpeakYay(); return; }}
+        clip.volume = 1.0;
+        var played = clip.play();
+        if (played && played.catch) {{ played.catch(ssSpeakYay); }}
     }}, 600);
 </script>
 """

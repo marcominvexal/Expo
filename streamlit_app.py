@@ -27,6 +27,7 @@ SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit#gid={
 # gemini-2.5-flash is closed to new API keys. Tried in order; set GEMINI_MODEL (comma-separated) in secrets to override.
 DEFAULT_GEMINI_MODELS = ("gemini-3.5-flash", "gemini-3.8-flash")
 SYNC_SUCCESS_STICKER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "sync-success.webp")
+SYNC_SUCCESS_YAY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "sync-yay.mp3")
 
 
 def sync_success_html():
@@ -36,7 +37,13 @@ def sync_success_html():
             encoded = base64.b64encode(fh.read()).decode("ascii")
     except OSError:
         return SYNC_SUCCESS_CHARACTER_HTML
-    return sync_success_sticker_html(f"data:image/webp;base64,{encoded}")
+    yay_audio = None
+    try:
+        with open(SYNC_SUCCESS_YAY_PATH, "rb") as fh:
+            yay_audio = "data:audio/mpeg;base64," + base64.b64encode(fh.read()).decode("ascii")
+    except OSError:
+        pass  # no clip: the card falls back to the browser's spoken "Yaaayyy!"
+    return sync_success_sticker_html(f"data:image/webp;base64,{encoded}", yay_audio)
 
 
 def env_or_secret(key, default=None):
