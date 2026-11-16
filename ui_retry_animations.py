@@ -355,3 +355,202 @@ SYNC_SUCCESS_CHARACTER_HTML = """
     }, 400);
 </script>
 """
+
+
+
+def sync_success_sticker_html(image_data_uri):
+    """Sync success: sticker pops up, giggles, says "Yay!" with party poppers, then goes back."""
+    colors = ["#FFDE4D", "#FF5E8A", "#4DD8FF", "#7CFF6B", "#B27CFF", "#FF9F43"]
+    confetti = []
+    for i in range(36):
+        side = "left" if i % 2 == 0 else "right"
+        # Fan the pieces upward and inward from each popper.
+        dx = (30 + (i * 37) % 170) * (1 if side == "left" else -1)
+        dy = -(90 + (i * 53) % 140)
+        spin = (i * 97) % 720 - 360
+        delay = 0.55 + (i % 6) * 0.03
+        confetti.append(
+            f'<span class="cf cf-{side}" style="--dx:{dx}px;--dy:{dy}px;--spin:{spin}deg;'
+            f'background:{colors[i % len(colors)]};animation-delay:{delay:.2f}s;'
+            f'{"border-radius:50%;" if i % 3 == 0 else ""}"></span>'
+        )
+    confetti_html = "".join(confetti)
+    return f"""
+<div class="ss-box">
+    <div class="ss-stage">
+        <span class="ss-popper ss-popper-left">&#127881;</span>
+        <span class="ss-popper ss-popper-right">&#127881;</span>
+        {confetti_html}
+        <div class="ss-bubble"><span class="ss-spark ss-spark-1">&#10024;</span><span class="ss-yay">Yaaayyy!</span> &#127881;<span class="ss-spark ss-spark-2">&#10024;</span></div>
+        <img class="ss-sticker" src="{image_data_uri}" alt="Yay, sync complete">
+    </div>
+    <div class="ss-caption">Sync completed &mdash; your live funnel is updated.</div>
+</div>
+<style>
+    body {{ margin: 0; }}
+    .ss-box {{
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        padding: 12px 16px 16px;
+        background: linear-gradient(135deg, #14142B 0%, #080811 100%);
+        border-radius: 24px;
+        border: 1px solid #222244;
+        font-family: 'Segoe UI', system-ui, sans-serif;
+        overflow: hidden;
+    }}
+    .ss-stage {{
+        position: relative;
+        width: 100%;
+        height: 230px;
+        display: flex;
+        align-items: flex-end;
+        justify-content: center;
+    }}
+    .ss-sticker {{
+        width: 180px;
+        height: 180px;
+        object-fit: contain;
+        transform-origin: 50% 90%;
+        transform: scale(0);
+        filter: drop-shadow(0 10px 18px rgba(0, 0, 0, 0.45));
+        /* pop up -> giggle -> hold -> go back down */
+        animation: ss-pop 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s forwards,
+                   ss-giggle 1.1s ease-in-out 0.6s,
+                   ss-back 0.5s cubic-bezier(0.55, 0, 0.75, -0.4) 3.2s forwards;
+    }}
+    @keyframes ss-pop {{
+        0% {{ transform: scale(0) translateY(60px); }}
+        100% {{ transform: scale(1) translateY(0); }}
+    }}
+    @keyframes ss-giggle {{
+        0%, 100% {{ transform: scale(1) rotate(0deg); }}
+        10% {{ transform: scale(1.04, 0.96) rotate(-7deg); }}
+        20% {{ transform: scale(0.97, 1.03) rotate(6deg); }}
+        30% {{ transform: scale(1.04, 0.96) rotate(-6deg); }}
+        40% {{ transform: scale(0.97, 1.03) rotate(5deg); }}
+        50% {{ transform: scale(1.03, 0.97) rotate(-4deg); }}
+        60% {{ transform: scale(0.98, 1.02) rotate(3deg); }}
+        75% {{ transform: scale(1.01) rotate(-1.5deg); }}
+    }}
+    @keyframes ss-back {{
+        0% {{ transform: scale(1) translateY(0); }}
+        100% {{ transform: scale(0) translateY(60px); }}
+    }}
+    .ss-bubble {{
+        position: absolute;
+        top: 6px;
+        left: 50%;
+        transform: translateX(-50%) scale(0);
+        background: linear-gradient(135deg, #FFDE4D 0%, #F1C40F 100%);
+        border-radius: 18px;
+        padding: 8px 20px;
+        font-size: 26px;
+        font-weight: 900;
+        color: #0C0C1E;
+        white-space: nowrap;
+        z-index: 2;
+        animation: ss-bubble-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) 0.55s forwards,
+                   ss-bubble-out 0.3s ease-in 3.1s forwards;
+    }}
+    .ss-bubble::after {{
+        content: '';
+        position: absolute;
+        bottom: -9px;
+        left: 50%;
+        transform: translateX(-50%);
+        border-width: 10px 9px 0;
+        border-style: solid;
+        border-color: #F1C40F transparent;
+    }}
+    .ss-yay {{
+        display: inline-block;
+        background: linear-gradient(90deg, #FF3B6B, #FF9F1C, #FFE14D, #3BE38B, #3BB8FF, #A35BFF, #FF3B6B);
+        background-size: 300% 100%;
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        -webkit-text-stroke: 0.6px rgba(12, 12, 30, 0.35);
+        animation: ss-rainbow 1.2s linear infinite, ss-sing 0.45s ease-in-out 0.9s 4 alternate;
+    }}
+    @keyframes ss-rainbow {{
+        to {{ background-position: 300% 0; }}
+    }}
+    @keyframes ss-sing {{
+        from {{ transform: scale(1) rotate(-3deg); }}
+        to {{ transform: scale(1.15) rotate(3deg); }}
+    }}
+    .ss-spark {{
+        position: absolute;
+        font-size: 18px;
+        animation: ss-twinkle 0.6s ease-in-out infinite alternate;
+    }}
+    .ss-spark-1 {{ top: -12px; left: -10px; }}
+    .ss-spark-2 {{ bottom: -8px; right: -12px; animation-delay: 0.3s; }}
+    @keyframes ss-twinkle {{
+        from {{ transform: scale(0.6) rotate(0deg); opacity: 0.6; }}
+        to {{ transform: scale(1.2) rotate(25deg); opacity: 1; }}
+    }}
+    @keyframes ss-bubble-in {{
+        to {{ transform: translateX(-50%) scale(1); }}
+    }}
+    @keyframes ss-bubble-out {{
+        from {{ transform: translateX(-50%) scale(1); opacity: 1; }}
+        to {{ transform: translateX(-50%) scale(0.6); opacity: 0; }}
+    }}
+    .ss-popper {{
+        position: absolute;
+        bottom: 18px;
+        font-size: 40px;
+        opacity: 0;
+        animation: ss-popper 3.4s ease-out 0.45s forwards;
+    }}
+    .ss-popper-left {{ left: 12%; }}
+    .ss-popper-right {{ right: 12%; transform: scaleX(-1); }}
+    @keyframes ss-popper {{
+        0% {{ opacity: 0; translate: 0 20px; }}
+        8% {{ opacity: 1; translate: 0 -6px; }}
+        14% {{ translate: 0 0; }}
+        85% {{ opacity: 1; }}
+        100% {{ opacity: 0; }}
+    }}
+    .cf {{
+        position: absolute;
+        bottom: 40px;
+        width: 8px;
+        height: 12px;
+        opacity: 0;
+        animation: ss-confetti 1.6s cubic-bezier(0.15, 0.6, 0.35, 1) forwards;
+    }}
+    .cf-left {{ left: calc(12% + 20px); }}
+    .cf-right {{ right: calc(12% + 20px); }}
+    @keyframes ss-confetti {{
+        0% {{ opacity: 1; transform: translate(0, 0) rotate(0deg); }}
+        60% {{ opacity: 1; }}
+        100% {{ opacity: 0; transform: translate(var(--dx), calc(var(--dy) + 120px)) rotate(var(--spin)); }}
+    }}
+    .ss-caption {{
+        margin-top: 6px;
+        color: #C9C9E8;
+        font-size: 14px;
+        font-weight: 600;
+    }}
+</style>
+<script>
+    setTimeout(function() {{
+        if (!window.speechSynthesis) return;
+        window.speechSynthesis.cancel();
+        // Sing-song "Yaaayyy!": a stretched high note that swoops up.
+        var yay = new SpeechSynthesisUtterance('Yaaaaaay!');
+        yay.volume = 1.0;
+        yay.pitch = 2.0;
+        yay.rate = 0.7;
+        var yay2 = new SpeechSynthesisUtterance('Yaaaay!');
+        yay2.volume = 1.0;
+        yay2.pitch = 2.0;
+        yay2.rate = 0.85;
+        window.speechSynthesis.speak(yay);
+        window.speechSynthesis.speak(yay2);
+    }}, 600);
+</script>
+"""

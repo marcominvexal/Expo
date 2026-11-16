@@ -1,4 +1,5 @@
 import os
+import base64
 import imaplib
 import email
 from email.utils import parseaddr
@@ -13,7 +14,7 @@ from dotenv import load_dotenv
 from google import genai
 from google.oauth2.service_account import Credentials
 
-from ui_retry_animations import SYNC_SUCCESS_CHARACTER_HTML, gemini_retry_wait_html
+from ui_retry_animations import SYNC_SUCCESS_CHARACTER_HTML, gemini_retry_wait_html, sync_success_sticker_html
 
 # Local secrets (Streamlit Cloud uses st.secrets instead)
 load_dotenv("secrets.env", override=True)
@@ -25,6 +26,17 @@ WORKSHEET_GID = 0
 SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit#gid={WORKSHEET_GID}"
 # gemini-2.5-flash is closed to new API keys. Tried in order; set GEMINI_MODEL (comma-separated) in secrets to override.
 DEFAULT_GEMINI_MODELS = ("gemini-3.5-flash", "gemini-3.8-flash")
+SYNC_SUCCESS_STICKER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "sync-success.webp")
+
+
+def sync_success_html():
+    """Sticker pop-up on a successful sync; the robot character if the sticker file is missing."""
+    try:
+        with open(SYNC_SUCCESS_STICKER_PATH, "rb") as fh:
+            encoded = base64.b64encode(fh.read()).decode("ascii")
+    except OSError:
+        return SYNC_SUCCESS_CHARACTER_HTML
+    return sync_success_sticker_html(f"data:image/webp;base64,{encoded}")
 
 
 def env_or_secret(key, default=None):
@@ -1590,7 +1602,7 @@ with sync_col:
             if result and "Success" in result:
                 st.success(result)
                 st.balloons()
-                components.html(SYNC_SUCCESS_CHARACTER_HTML, height=270)
+                components.html(sync_success_html(), height=300)
             else:
                 st.error(result or "Unknown error.")
 with columns_col:
