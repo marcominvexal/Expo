@@ -1289,6 +1289,36 @@ def reapply_all_rules_and_align_sheet():
     )
 
 
+def summarize_sync_result(rows_added, emails_processed, failed_emails, unattempted, stop_reason, mark_read_error):
+    """One message for the sync button: ✅ only when every unread email was handled."""
+    left_unread = len(failed_emails) + unattempted
+    if rows_added:
+        headline = f"Added {rows_added} rows to the Google Sheet from {emails_processed} email(s)."
+    elif emails_processed:
+        headline = f"Processed {emails_processed} email(s); Gemini found no quote rows in them."
+    else:
+        headline = "No emails were processed."
+
+    notes = []
+    if left_unread:
+        notes.append(f"{left_unread} email(s) left unread and will be retried on the next sync.")
+    if stop_reason:
+        notes.append(f"Stopped early: {stop_reason}")
+    elif failed_emails:
+        notes.append("Failed: " + "; ".join(failed_emails[:3]) + (" …" if len(failed_emails) > 3 else ""))
+    if mark_read_error:
+        notes.append(
+            f"The rows were saved, but Gmail could not mark the emails as read ({mark_read_error}). "
+            "Mark them read yourself, or the next sync will add them again."
+        )
+
+    if not notes:
+        if rows_added:
+            return f"✅ Success! Added {rows_added} perfectly structured rows to the Google Sheet!"
+        return "Unread emails processed, but no valid data structures were detected by Gemini."
+    return "⚠️ " + headline + " " + " ".join(notes)
+
+
 def run_bot():
     mail = None
     try:
@@ -1305,18 +1335,27 @@ def run_bot():
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(email_user, email_pass)
         mail.select("inbox")
-        _, messages = mail.search(None, 'UNSEEN')
-        email_ids = messages[0].split()
+        _, messages = mail.uid('SEARCH', None, 'UNSEEN')
+        email_uids = messages[0].split()
 
-        if not email_ids:
+        if not email_uids:
             return "No new (unread) emails found. Mark a quote email as 'Unread' to test."
 
         new_rows = []
         public_holidays = load_public_holidays()
+        # Emails are read with BODY.PEEK so they stay unread until their rows are safely in the
+        # sheet. An email that fails extraction is left unread and retried on the next sync.
+        processed_uids = []
+        failed_emails = []
+        stop_reason = None
 
-        for num in email_ids:
-            _, data = mail.fetch(num, '(RFC822)')
-            msg = email.message_from_bytes(data[0][1])
+        for uid in email_uids:
+            _, data = mail.uid('FETCH', uid, '(BODY.PEEK[])')
+            raw_message = next((part[1] for part in data if isinstance(part, tuple)), None)
+            if raw_message is None:
+                failed_emails.append("an email Gmail returned without a body")
+                continue
+            msg = email.message_from_bytes(raw_message)
             email_from = msg.get("From", "")
 
             # Body only — Subject is never used for Quote ID.
@@ -1324,7 +1363,18 @@ def run_bot():
             # Force Quote ID from body F###-##…Z###-## before Gemini can invent subject refs.
             forced_quote_id = normalize_quote_id(None, email_body=body)
 
-            ai_data = get_ai_extraction(body, email_user)
+            try:
+                ai_data = get_ai_extraction(body, email_user)
+            except Exception as exc:
+                failed_emails.append(f"{email_from or 'unknown sender'} ({exc})")
+                # Gemini itself is down (spend cap or still overloaded after retrying): every
+                # remaining email would fail the same way, so stop instead of waiting on each one.
+                if isinstance(exc, TimeoutError) or _is_gemini_spend_cap_error(exc)                         or _is_gemini_spend_cap_error(exc.__cause__ or ""):
+                    stop_reason = str(exc)
+                    break
+                continue
+
+            processed_uids.append(uid)
             circuits = ai_data.get('circuits', [])
             if isinstance(circuits, dict):
                 circuits = [circuits]
@@ -1424,9 +1474,23 @@ def run_bot():
                 )
             except Exception:
                 pass
-            return f"✅ Success! Added {len(new_rows)} perfectly structured rows to the Google Sheet!"
 
-        return "Unread emails processed, but no valid data structures were detected by Gemini."
+        # Only now — with the rows saved — mark the processed emails as read.
+        mark_read_error = None
+        if processed_uids:
+            try:
+                mail.uid('STORE', b",".join(processed_uids), '+FLAGS', r'(\Seen)')
+            except Exception as exc:
+                mark_read_error = exc
+
+        return summarize_sync_result(
+            rows_added=len(new_rows),
+            emails_processed=len(processed_uids),
+            failed_emails=failed_emails,
+            unattempted=len(email_uids) - len(processed_uids) - len(failed_emails),
+            stop_reason=stop_reason,
+            mark_read_error=mark_read_error,
+        )
 
     except imaplib.IMAP4.error as e:
         return f"Gmail Login Failed: Make sure your App Password is correct and has no spaces. Error: {e}"
@@ -1603,6 +1667,8 @@ with sync_col:
                 st.success(result)
                 st.balloons()
                 components.html(sync_success_html(), height=300)
+            elif result and result.startswith("⚠️"):
+                st.warning(result)
             else:
                 st.error(result or "Unknown error.")
 with columns_col:
