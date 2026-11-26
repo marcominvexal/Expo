@@ -1,5 +1,4 @@
 import os
-import base64
 import imaplib
 import email
 from email.utils import parseaddr
@@ -9,14 +8,13 @@ import re
 import time
 import gspread
 import streamlit as st
-import streamlit.components.v1 as components
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types as genai_types
 from google.oauth2.service_account import Credentials
 
-from ui_retry_animations import SYNC_SUCCESS_CHARACTER_HTML, gemini_retry_wait_html, sync_success_sticker_html
+from ui_notices import gemini_retry_wait_html
 
 # Local secrets (Streamlit Cloud uses st.secrets instead)
 load_dotenv("secrets.env", override=True)
@@ -29,24 +27,6 @@ SHEET_URL = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/edit#gid={
 # gemini-2.5-flash is closed to new API keys. Tried in order; set GEMINI_MODEL (comma-separated) in secrets to override.
 DEFAULT_GEMINI_MODELS = ("gemini-3.5-flash", "gemini-3.8-flash")
 GEMINI_REQUEST_TIMEOUT_SECONDS = 90
-SYNC_SUCCESS_STICKER_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "sync-success.webp")
-SYNC_SUCCESS_YAY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "assets", "sync-yay.mp3")
-
-
-def sync_success_html():
-    """Sticker pop-up on a successful sync; the robot character if the sticker file is missing."""
-    try:
-        with open(SYNC_SUCCESS_STICKER_PATH, "rb") as fh:
-            encoded = base64.b64encode(fh.read()).decode("ascii")
-    except OSError:
-        return SYNC_SUCCESS_CHARACTER_HTML
-    yay_audio = None
-    try:
-        with open(SYNC_SUCCESS_YAY_PATH, "rb") as fh:
-            yay_audio = "data:audio/mpeg;base64," + base64.b64encode(fh.read()).decode("ascii")
-    except OSError:
-        pass  # no clip: the card falls back to the browser's spoken "Yaaayyy!"
-    return sync_success_sticker_html(f"data:image/webp;base64,{encoded}", yay_audio)
 
 
 def env_or_secret(key, default=None):
@@ -1211,7 +1191,7 @@ def reapply_all_rules_and_align_sheet():
     ensure_funnel_sheet_columns(sheet)
     all_values = sheet.get_all_values()
     if not all_values or len(all_values) <= 1:
-        return "Sheet contains no data rows to align."
+        return "info", "The sheet has no data rows to update."
 
     data_rows = all_values[1:]
     public_holidays = load_public_holidays()
@@ -1303,8 +1283,9 @@ def reapply_all_rules_and_align_sheet():
             {"numberFormat": {"type": "CURRENCY", "pattern": "$#,##0.00"}},
         )
     return (
-        f"Success! Reapplied all automation rules (Pakistan holiday-aware TAT) and bunched "
-        f"Quote IDs in ascending order across all {len(aligned_rows)} live funnel lines!"
+        "success",
+        f"Rules re-applied to all {len(aligned_rows)} rows: dates, Quote IDs and turnaround times "
+        "(excluding weekends and Pakistan public holidays) were updated, and rows are sorted by Quote ID.",
     )
 
 
@@ -1319,18 +1300,18 @@ def _decoded_header(value, limit=70):
 
 
 def summarize_sync_result(rows_added, emails_processed, failed_emails, unattempted, stop_reason, mark_read_error):
-    """One message for the sync button: ✅ only when every unread email was handled."""
+    """(level, message) for the sync result: "success" only when every unread email was handled."""
     left_unread = len(failed_emails) + unattempted
     if rows_added:
-        headline = f"Added {rows_added} rows to the Google Sheet from {emails_processed} email(s)."
+        headline = f"Added {rows_added} row{'s' if rows_added != 1 else ''} from {emails_processed} email{'s' if emails_processed != 1 else ''}."
     elif emails_processed:
-        headline = f"Processed {emails_processed} email(s); Gemini found no quote rows in them."
+        headline = f"Processed {emails_processed} email{'s' if emails_processed != 1 else ''}; none contained quote details."
     else:
         headline = "No emails were processed."
 
     notes = []
     if left_unread:
-        notes.append(f"{left_unread} email(s) left unread and will be retried on the next sync.")
+        notes.append(f"{left_unread} email{'s were' if left_unread != 1 else ' was'} left unread and will be retried on the next sync.")
     if stop_reason:
         notes.append(f"Stopped early: {stop_reason}")
     elif failed_emails:
@@ -1343,9 +1324,9 @@ def summarize_sync_result(rows_added, emails_processed, failed_emails, unattempt
 
     if not notes:
         if rows_added:
-            return f"✅ Success! Added {rows_added} perfectly structured rows to the Google Sheet!"
-        return "Unread emails processed, but no valid data structures were detected by Gemini."
-    return "⚠️ " + headline + " " + " ".join(notes)
+            return "success", f"Sync complete. {headline}"
+        return "info", f"Sync complete. {headline}"
+    return "warning", "Sync partly complete. " + headline + " " + " ".join(notes)
 
 
 def run_bot():
@@ -1359,7 +1340,7 @@ def run_bot():
         email_user = env_or_secret("EMAIL_USER")
         email_pass = (env_or_secret("EMAIL_PASS") or "").replace(" ", "")
         if not email_user or not email_pass:
-            return "Set EMAIL_USER and EMAIL_PASS in secrets.env or Streamlit Cloud secrets."
+            return "error", "Gmail is not configured: set EMAIL_USER and EMAIL_PASS in the app secrets."
 
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
         mail.login(email_user, email_pass)
@@ -1368,7 +1349,7 @@ def run_bot():
         email_uids = messages[0].split()
 
         if not email_uids:
-            return "No new (unread) emails found. Mark a quote email as 'Unread' to test."
+            return "info", "No unread emails to process. To re-process an email, mark it as unread in Gmail."
 
         new_rows = []
         public_holidays = load_public_holidays()
@@ -1535,9 +1516,9 @@ def run_bot():
         )
 
     except imaplib.IMAP4.error as e:
-        return f"Gmail Login Failed: Make sure your App Password is correct and has no spaces. Error: {e}"
+        return "error", f"Gmail sign-in failed. Check that EMAIL_PASS is a valid Gmail app password. ({e})"
     except Exception as e:
-        return f"Operational Error: {str(e)}"
+        return "error", f"The sync stopped because of an error: {e}. No emails were marked as read."
     finally:
         if mail:
             try:
@@ -1548,88 +1529,28 @@ def run_bot():
 # Streamlit Setup
 LOGO_URL = "https://exponentiaglobal.com/wp-content/uploads/2023/09/1-1.png"
 SITE_URL = "https://exponentiaglobal.com/"
-INVEXAL_LOGO = "https://invexal.com/wp-content/uploads/2023/07/Invexal-Logo-01-1.png"
-GEMINI_LOGO = "https://upload.wikimedia.org/wikipedia/commons/8/8a/Google_Gemini_logo.svg"
-GMAIL_LOGO = "https://www.gstatic.com/images/branding/product/2x/gmail_2020q4_48dp.png"
-SHEETS_LOGO = "https://www.gstatic.com/images/branding/product/2x/sheets_2020q4_48dp.png"
-GITHUB_REPO_URL = "https://github.com/marcominvexal/Expo"
-STREAMLIT_DEPLOY_URL = (
-    "https://share.streamlit.io/deploy?repository=marcominvexal/Expo"
-    "&branch=main&mainModule=streamlit_app.py"
-)
 
 st.set_page_config(
-    page_title="Exponentia Sales Bot",
-    page_icon="📞",
+    page_title="Quote Funnel Sync · Exponentia Global",
+    page_icon=":material/sync_alt:",
     layout="wide",
     initial_sidebar_state="collapsed",
 )
 
-def inject_custom_css():
-    import streamlit.components.v1 as components
 
+def inject_custom_css():
     css_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui.css")
     try:
         with open(css_path, encoding="utf-8") as f:
             css = f.read()
     except OSError:
         return
-    # Inject into parent document (Streamlit 1.5x iframes block scoped <style> in markdown)
-    components.html(
-        f"""
-        <script>
-        (function() {{
-            const doc = window.parent.document;
-            let el = doc.getElementById("exp-bot-styles");
-            if (!el) {{
-                el = doc.createElement("style");
-                el.id = "exp-bot-styles";
-                doc.head.appendChild(el);
-            }}
-            el.textContent = {json.dumps(css)};
-            let bg = doc.getElementById("exp-bot-bg");
-            if (!bg) {{
-                bg = doc.createElement("div");
-                bg.id = "exp-bot-bg";
-                bg.className = "exp-bg-orbs";
-                bg.innerHTML = "<span class=\\"orb-a\\"></span><span class=\\"orb-b\\"></span><span class=\\"orb-c\\"></span>";
-                doc.body.prepend(bg);
-            }}
-            let particles = doc.getElementById("exp-bot-particles");
-            if (!particles) {{
-                particles = doc.createElement("div");
-                particles.id = "exp-bot-particles";
-                particles.className = "exp-bg-particles";
-                doc.body.prepend(particles);
-            }}
-            if (particles.childElementCount === 0) {{
-                const colors = ["#67e8f9", "#38bdf8", "#60a5fa", "#3b82f6", "#22d3ee"];
-                for (let i = 0; i < 50; i++) {{
-                    const p = doc.createElement("span");
-                    p.className = "particle";
-                    const size = 2 + Math.random() * 5;
-                    const left = Math.random() * 100;
-                    const delay = Math.random() * 22;
-                    const duration = 14 + Math.random() * 20;
-                    const color = colors[i % colors.length];
-                    p.style.cssText = [
-                        "left:" + left + "%",
-                        "width:" + size + "px",
-                        "height:" + size + "px",
-                        "background:" + color,
-                        "color:" + color,
-                        "animation-duration:" + duration + "s," + (2 + Math.random() * 3) + "s",
-                        "animation-delay:" + delay + "s," + (Math.random() * 2) + "s",
-                    ].join(";");
-                    particles.appendChild(p);
-                }}
-            }}
-        }})();
-        </script>
-        """,
-        height=0,
-    )
     st.markdown(f"<style>{css}</style>", unsafe_allow_html=True)
+
+
+def show_result(level, message):
+    {"success": st.success, "warning": st.warning, "info": st.info}.get(level, st.error)(message)
+
 
 inject_custom_css()
 
@@ -1638,165 +1559,147 @@ if not creds_ok:
     st.error(creds_error)
     found_keys = _streamlit_secret_top_level_keys()
     st.warning(
-        f"Secrets detected in app: **{', '.join(found_keys) if found_keys else 'none'}**. "
-        "You must include the **`[gcp_service_account]`** section (not only GEMINI/EMAIL)."
+        f"Secret sections found: **{', '.join(found_keys) if found_keys else 'none'}**. "
+        "A complete **`[gcp_service_account]`** section is required as well as the Gemini and Gmail keys."
     )
-    with st.expander("Copy this into Streamlit Cloud → Settings → Secrets, then Reboot"):
-        base = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".streamlit")
-        for name in ("secrets.toml", "secrets.toml.example"):
-            path = os.path.join(base, name)
-            try:
-                with open(path, encoding="utf-8") as handle:
-                    st.caption(f"From `{name}`:")
-                    st.code(handle.read(), language="toml")
-                    break
-            except OSError:
-                continue
-        else:
+    # Only ever show the blank template here: this page is visible to anyone who opens the app.
+    example_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".streamlit", "secrets.toml.example")
+    with st.expander("Secrets template"):
+        try:
+            with open(example_path, encoding="utf-8") as handle:
+                st.code(handle.read(), language="toml")
+        except OSError:
             st.markdown(
-                "Paste GEMINI_API_KEY, EMAIL_USER, EMAIL_PASS, and a full "
-                "`[gcp_service_account]` block from `service_account.json`."
+                "Provide `GEMINI_API_KEY`, `EMAIL_USER`, `EMAIL_PASS` and the full "
+                "`[gcp_service_account]` block from the service account JSON."
             )
         st.markdown(
-            "**Checklist:** `[gcp_service_account]` header on its own line · "
-            "multiline `private_key` in triple quotes · **Save** · **Reboot app** · "
-            "share the Google Sheet with the service account `client_email`."
+            "Put `[gcp_service_account]` on its own line, keep `private_key` in triple quotes, save, "
+            "reboot the app, and share the Google Sheet with the service account's `client_email`."
         )
     st.stop()
 
-hero_left, hero_right = st.columns([1.1, 2.2], gap="large")
-with hero_left:
-    st.image(LOGO_URL, width=160)
-with hero_right:
+# Header
+logo_col, title_col, link_col = st.columns([1, 4, 1.4], vertical_alignment="center")
+with logo_col:
+    st.image(LOGO_URL, width=140)
+with title_col:
     st.markdown(
-        f"""
-        <div class="hero-shell">
-            <p class="hero-sub hero-kicker">Exponentia Global</p>
-            <h1 class="hero-title">Live Sales Funnel Bot</h1>
-            <p class="hero-sub">Sync unread quote emails to your funnel sheet with Gemini-powered extraction.</p>
-            <div class="powered-by">
-                <span class="powered-label">Powered by</span>
-                <div class="powered-logos">
-                    <img src="{INVEXAL_LOGO}" alt="Invexal" class="partner-logo logo-invexal" title="Invexal" />
-                    <img src="{GEMINI_LOGO}" alt="Google Gemini" class="partner-logo logo-gemini" title="Gemini AI" />
-                    <img src="{GMAIL_LOGO}" alt="Gmail" class="partner-logo logo-gmail" title="Gmail" />
-                    <img src="{SHEETS_LOGO}" alt="Google Sheets" class="partner-logo logo-sheets" title="Google Sheets" />
-                </div>
-            </div>
+        """
+        <div class="page-header">
+            <p class="eyebrow">Exponentia Global · Sales Operations</p>
+            <h1 class="page-title">Quote Funnel Sync</h1>
+            <p class="page-subtitle">Turns unread quote emails into rows in the sales funnel sheet.</p>
         </div>
         """,
         unsafe_allow_html=True,
     )
-    st.markdown(f'<a class="site-link" href="{SITE_URL}" target="_blank">↗ exponentiaglobal.com</a>', unsafe_allow_html=True)
+with link_col:
+    st.link_button("Open funnel sheet", SHEET_URL, icon=":material/open_in_new:", use_container_width=True)
 
-st.markdown(
-    """
-    <div class="glass-card">
-        <p class="card-label">Automation Control</p>
-        <p class="card-heading">Process or Align Live Data Structures</p>
-        <p class="card-body">Mark a quote email as <strong>Unread</strong> in Gmail to parse new threads, or trigger the full framework realignment engine to force structural updates on past sheet history.</p>
-    </div>
-    """,
-    unsafe_allow_html=True,
+st.markdown('<p class="section-label">Actions</p>', unsafe_allow_html=True)
+
+ACTIONS = (
+    (
+        "sync",
+        "Sync new emails",
+        "Reads unread emails in the sales inbox, extracts the quote details and adds them to the sheet. "
+        "An email is marked as read only after its rows are saved.",
+        "Sync now",
+        "primary",
+    ),
+    (
+        "reapply",
+        "Re-apply rules",
+        "Re-formats dates, Quote IDs and turnaround times across the whole sheet, "
+        "then sorts the rows by Quote ID.",
+        "Re-apply rules",
+        "secondary",
+    ),
+    (
+        "columns",
+        "Check sheet columns",
+        "Makes sure row 1 has every funnel column header. Existing data is not changed.",
+        "Check columns",
+        "secondary",
+    ),
 )
 
-sync_col, columns_col, format_col, info_col = st.columns([1.2, 1, 1.3, 1])
-with sync_col:
-    if st.button("Sync Gmail to Google Sheets"):
-        with st.spinner("Analyzing emails with Gemini…"):
-            result = run_bot()
-            if result and "Success" in result:
-                st.success(result)
-                st.balloons()
-                components.html(sync_success_html(), height=300)
-            elif result and result.startswith("⚠️"):
-                st.warning(result)
-            else:
-                st.error(result or "Unknown error.")
-with columns_col:
-    if st.button("Setup sheet columns"):
-        with st.spinner("Checking funnel column headers…"):
-            try:
-                sheet = get_funnel_worksheet()
-                changed, result = ensure_funnel_sheet_columns(sheet)
-                if changed:
-                    st.success(result)
-                else:
-                    st.info(result)
-            except Exception as exc:
-                st.error(f"Could not update sheet columns: {exc}")
-with format_col:
-    if st.button("Reapply All Rules & Align Sheet"):
-        with st.spinner("Executing alignment engine across all cell matrices…"):
-            result = reapply_all_rules_and_align_sheet()
-            if result and "Success" in result:
-                st.success(result)
-                st.toast("Sheet data framework perfectly aligned!", icon="✨")
-            else:
-                st.warning(result or "No rows aligned.")
-with info_col:
+clicked = None
+for column, (key, title, description, label, kind) in zip(st.columns(3, gap="medium"), ACTIONS):
+    with column:
+        with st.container(border=True):
+            st.markdown(
+                f'<p class="card-title">{title}</p><p class="card-text">{description}</p>',
+                unsafe_allow_html=True,
+            )
+            if st.button(label, key=f"action_{key}", type=kind, use_container_width=True):
+                clicked = key
+
+if clicked == "sync":
+    with st.spinner("Syncing emails…"):
+        show_result(*run_bot())
+elif clicked == "reapply":
+    with st.spinner("Re-applying rules to every row…"):
+        try:
+            show_result(*reapply_all_rules_and_align_sheet())
+        except Exception as exc:
+            show_result("error", f"Could not re-apply the rules: {exc}")
+elif clicked == "columns":
+    with st.spinner("Checking the column headers…"):
+        try:
+            changed, message = ensure_funnel_sheet_columns(get_funnel_worksheet())
+            show_result("success" if changed else "info", message)
+        except Exception as exc:
+            show_result("error", f"Could not check the sheet columns: {exc}")
+
+st.markdown('<p class="section-label">Good to know</p>', unsafe_allow_html=True)
+with st.container(border=True):
     st.markdown(
         """
-        <div class="glass-card" style="margin-top:0;padding:1.25rem 1.5rem;">
-            <p class="card-label">Quick tips</p>
-            <p class="card-body" style="margin:0;">
-            • EVPL Linear auto-maps to Ethernet<br>
-            • TAT excludes weekends + Pakistan holidays<br>
-            • Run Align Sheet to fix historical TAT
-            </p>
-        </div>
-        """,
-        unsafe_allow_html=True,
+- Only emails that are **unread** in the sales inbox are processed. To re-process one, mark it as unread in Gmail.
+- Quote IDs are read from the email body only and written as letter + 3 digits + year, e.g. **I835-26**.
+- Turnaround time counts business days and excludes Pakistan public holidays.
+- EVPL Linear is recorded as Ethernet.
+        """
     )
 
-st.markdown(
-    f"""
-    <div class="sheet-link-wrap">
-        <a href="{SHEET_URL}" target="_blank">Open Live Google Sheet →</a>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
-
-with st.expander("📋 How each column is filled — Extraction & Automation Rules"):
+with st.expander("How each column is filled"):
     st.markdown(
         """
-<div class="glass-card" style="margin:0;padding:1.5rem 2rem;">
+Gemini extracts the raw details from each email; the app then cleans and validates every field before writing the row.
 
-**Every row in the funnel sheet is built from these rules.** Gemini AI extracts the raw data from the email; then the bot cleans and validates each field before writing it to the sheet.
 
----
-
-#### 🆔 Quote ID
+#### Quote ID
 Only Exponentia internal IDs with a prefix letter **F** through **Z** (e.g. **I835-26**, **F780-23**, **G101-26**) are accepted.
 The bot reads the email **body only** (never the subject line) and looks for the sales tag near *"Add and archive"* or a *"Quote ID: …"* label.
 Partner references (QTE-…, Vodafone numbers, PID/BID/SP) are always rejected.
 
-#### 📅 Opportunity Date
+#### Opportunity Date
 The date work **actually started** — not the first email in the thread.
 - Older messages about a different scope or country are ignored.
 - If our team was waiting on missing info (LPOC, capacity, customer name), the clock starts when that info arrived.
 - Idle wait-on-customer days are excluded.
 
-#### 📅 Proposal Date
+#### Proposal Date
 The date our team sent the **final pricing response**.
 If no pricing was sent yet, it defaults to the Opportunity Date.
 
-#### 🏢 Partner Name
+#### Partner Name
 The external company that emailed Exponentia to request a quote (e.g. *CMC Networks*, *Noor Data Network*).
 It is **never** set to "Exponentia Global." If not found, the bot uses the sender's email domain.
 
-#### 🏭 End Customer
+#### End Customer
 The final client organization (e.g. *Baker Hughes*).
 Defaults to **Unknown** if no end customer is mentioned.
 
-#### 📍 Site A / Site A City
+#### Site A / Site A City
 Address and city extracted from the email. Defaults to **-**.
 
-#### 📍 Site B / Site B City
+#### Site B / Site B City
 Same as Site A — but **forced to "-"** for Internet / DIA / BIA services (no B-end).
 
-#### 🔧 Technology
+#### Technology
 Strict mapping from the service type:
 
 | Service | → Technology |
@@ -1807,87 +1710,61 @@ Strict mapping from the service type:
 | Colocation + PWR | Datacenter |
 | Cross Connects / Equipment / Field Support | Managed Services / Hardware |
 
-#### 📦 Service / Products
+#### Service / Products
 The raw service name from the email (e.g. *DIA*, *IPLC*, *L2VPN*).
 
-#### 📶 Capacity / Quantity
+#### Capacity / Quantity
 Always includes the unit — e.g. **50 Mbps**, **20 Gbps**.
 
-#### 💰 NRC & MRC
+#### NRC & MRC
 Formatted with **$** and commas (e.g. *$1,500.00*). If not available → **-**.
 
-#### 📧 Mode of Communication
+#### Mode of Communication
 Always set to **Email**.
 
-#### 📝 Contract Term
+#### Contract Term
 Always in months — e.g. **12 Months**, **24 Months**, **36 Months**.
 If one row has multiple terms (12 / 24 / 36), a **separate row** is created for each.
 
-#### 👤 Sales Effort By / POC / Contact Email
+#### Sales Effort By / POC / Contact Email
 Extracted from the email. Default **-** if not mentioned.
 
-#### 💬 Comments
+#### Comments
 Notes or context from the email thread. Default **-**.
 
-#### 📊 Status / Sub-status
+#### Status / Sub-status
 New rows are always **OPEN** / **MEDIUM**.
 
-#### ⏱️ TAT (Turnaround Time)
+#### TAT (Turnaround Time)
 Business days between Opportunity and Proposal dates — **excluding weekends and Pakistan public holidays** (loaded from `holidays.json`).
 
-#### 🌐 On-Net / Off-Net
+#### On-Net / Off-Net
 Defaults to **On-Net** unless the email explicitly says *off-net*.
 
-#### 🔌 LM Infra Details
+#### LM Infra Details
 Exactly **Fiber** or **Wireless** — the physical last-mile media type.
 Terms & conditions or SLA text is never placed here. Default: Fiber.
 
-#### 🛡️ Last Mile Protection
+#### Last Mile Protection
 Exactly **Protected**, **Unprotected**, or **N/A**. Default: Unprotected.
 
-#### 🛡️ Wet Segment Protection
+#### Wet Segment Protection
 Exactly **Protected**, **Unprotected**, or **N/A**. Default: N/A.
 This is protection status only — not fiber/wireless media type.
 
-#### 🔗 XC Included / Excluded
+#### XC Included / Excluded
 **Included**, **Excluded**, or **N/A**.
 For Internet / DIA / BIA → always **-** (not applicable).
 
-#### 🗓️ Holidays
+#### Holidays
 Number of Pakistan public holidays (weekdays only) that fell within the Opportunity → Proposal date range.
 
-#### 🎯 Offered Us
+#### Offered Us
 What we offered — e.g. **New Service**, **Renewal**, **Upgrade**. Default: New Service.
-
-</div>
-        """,
-        unsafe_allow_html=True,
+        """
     )
 
 st.markdown(
-    f"""
-    <div class="glass-card deploy-card">
-        <p class="card-label">Publish the app</p>
-        <p class="card-heading">Deploy in this order</p>
-        <ol class="deploy-steps">
-            <li><strong>Push to GitHub first</strong> — commit the full project (code only) to
-                <a href="{GITHUB_REPO_URL}" target="_blank">github.com/marcominvexal/Expo</a>.
-                Never commit <code>secrets.env</code>, <code>.env</code>, or <code>service_account.json</code>.</li>
-            <li><strong>Deploy on Streamlit Cloud</strong> — connect the same repo, branch <code>main</code>,
-                main file <code>streamlit_app.py</code>.</li>
-            <li><strong>Add Streamlit Secrets</strong> — paste TOML from <code>.streamlit/secrets.toml.example</code>
-                (Gemini, Gmail, <code>[gcp_service_account]</code>). Share the Google Sheet with the service account email.</li>
-            <li><strong>Open your live URL</strong> — e.g. <code>https://exponentiabot-xxxxx.streamlit.app</code>
-                (Streamlit redeploys automatically on each GitHub push).</li>
-        </ol>
-        <p class="card-body deploy-note">Vercel only hosts a static info page — the dashboard runs on Streamlit Cloud or locally at <code>localhost:8501</code>.</p>
-    </div>
-    """,
+    f'<p class="page-footer"><a href="{SITE_URL}" target="_blank">Exponentia Global</a> · Built by Invexal</p>',
     unsafe_allow_html=True,
 )
-
-deploy_col1, deploy_col2 = st.columns(2)
-with deploy_col1:
-    st.link_button("Open GitHub repo", GITHUB_REPO_URL, use_container_width=True)
-with deploy_col2:
-    st.link_button("Deploy on Streamlit Cloud", STREAMLIT_DEPLOY_URL, use_container_width=True)
